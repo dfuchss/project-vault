@@ -1,0 +1,22 @@
+-- A person in the household. Multi-profile is supported from the start.
+CREATE TABLE profile (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT,
+    createdAt INTEGER NOT NULL
+);
+
+selectAllProfiles:
+SELECT * FROM profile ORDER BY name;
+
+selectProfile:
+SELECT * FROM profile WHERE id = ?;
+
+insertProfile:
+INSERT INTO profile(id, name, color, createdAt) VALUES (?, ?, ?, ?);
+
+updateProfile:
+UPDATE profile SET name = ?, color = ? WHERE id = ?;
+
+deleteProfile:
+DELETE FROM profile WHERE id = ?;

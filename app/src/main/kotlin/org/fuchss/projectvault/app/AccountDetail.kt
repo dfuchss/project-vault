@@ -1,0 +1,470 @@
+package org.fuchss.projectvault.app
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import org.fuchss.projectvault.data.VaultRepository
+import org.fuchss.projectvault.data.db.Account
+import org.fuchss.projectvault.data.db.Category
+import org.fuchss.projectvault.data.db.Holding
+import org.fuchss.projectvault.data.db.ImportBatch
+import org.fuchss.projectvault.data.db.Profile
+import org.fuchss.projectvault.data.db.Txn
+import org.fuchss.projectvault.model.AccountType
+
+// ---------------------------------------------------------------- Account detail
+
+@Composable
+internal fun AccountDetail(
+    account: Account,
+    repo: VaultRepository,
+    owners: List<Profile>,
+    balance: Long?,
+    refreshKey: Int,
+    status: String?,
+    categories: List<Category>,
+    categoryById: Map<String, Category>,
+    onImport: () -> Unit,
+    onSetCategory: (Txn, String) -> Unit,
+    onNewCategory: (Txn) -> Unit,
+    onAcceptSuggestion: (Txn, String) -> Unit,
+    onDismissSuggestion: (Txn) -> Unit,
+    onDeleteBatch: (ImportBatch) -> Unit,
+    onDeleteAccount: () -> Unit,
+    onEditOwners: () -> Unit,
+    onManageCategories: () -> Unit,
+    onClassify: () -> Unit,
+) {
+    val batches = remember(account.id, refreshKey) { repo.batches(account.id) }
+    val txns = remember(account.id, refreshKey) {
+        if (account.type != AccountType.DEPOT) repo.transactions(account.id) else emptyList()
+    }
+    var selectedTxnId by remember(account.id) { mutableStateOf<String?>(null) }
+    val selectedTxn = txns.firstOrNull { it.id == selectedTxnId }
+    var search by remember(account.id) { mutableStateOf("") }
+    var filter by remember(account.id) { mutableStateOf("ALL") } // ALL | NONE | REVIEW | <categoryId>
+
+    Column(Modifier.fillMaxSize()) {
+        // header bar
+        Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(account.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Badge(accountTypeLabel(account.type))
+                        account.iban?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        // Owners are editable inline: click to assign this account to profiles (joint = several).
+                        Surface(onClick = onEditOwners, shape = RoundedCornerShape(50), color = Color.Transparent) {
+                            Row(
+                                Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                if (owners.isEmpty()) {
+                                    Text("+ Assign owner", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                } else {
+                                    owners.forEach {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Dot(parseHexColor(it.color)); Spacer(Modifier.width(4.dp)); Text(it.name, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                    Text("Edit", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(if (account.type == AccountType.DEPOT) "Depotwert" else "Kontostand", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(balance?.let(::formatCents) ?: "—", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                }
+                if (ImportSupport.isSupported(account.type)) {
+                    Button(onClick = onImport) { Text("Import statement…") }
+                }
+                TextButton(onClick = onDeleteAccount, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+                    Text("Delete", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+        status?.let { Spacer(Modifier.height(8.dp)); Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary) }
+        Spacer(Modifier.height(16.dp))
+
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                if (account.type == AccountType.DEPOT) {
+                    DepotPane(account, repo, refreshKey)
+                } else {
+                    val filtered = txns.filter { t ->
+                        (search.isBlank() || (t.counterparty ?: "").contains(search, true) || t.purpose.contains(search, true)) &&
+                            when (filter) {
+                                "ALL" -> true
+                                "NONE" -> t.categoryId == null
+                                "REVIEW" -> t.categoryId == null && t.suggestedCategoryId != null
+                                else -> t.categoryId == filter
+                            }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val countLabel = if (filtered.size == txns.size) "${txns.size}" else "${filtered.size} of ${txns.size}"
+                        Text("Transactions ($countLabel)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        val uncategorized = txns.count { it.categoryId == null }
+                        if (uncategorized > 0) OutlinedButton(onClick = onClassify) { Text("Categorize $uncategorized") }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    TransactionFilters(
+                        search = search,
+                        onSearch = { search = it },
+                        filter = filter,
+                        onFilter = { filter = it },
+                        categories = categories,
+                        categoryById = categoryById,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (txns.isEmpty()) EmptyHint("No transactions yet. Import a statement.")
+                    else if (filtered.isEmpty()) EmptyHint("No transactions match the filter.")
+                    else LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        items(filtered) { txn ->
+                            TxnRow(
+                                txn = txn,
+                                category = txn.categoryId?.let { categoryById[it] },
+                                suggested = txn.suggestedCategoryId?.let { categoryById[it] },
+                                selected = txn.id == selectedTxnId,
+                                onClick = { selectedTxnId = txn.id },
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+            // inspector: transaction detail + origin + category picker, else import history
+            Column(Modifier.width(300.dp).fillMaxHeight()) {
+                if (selectedTxn != null && account.type != AccountType.DEPOT) {
+                    TxnInspector(
+                        txn = selectedTxn,
+                        batch = repo.batch(selectedTxn.importBatchId),
+                        categories = categories,
+                        current = selectedTxn.categoryId?.let { categoryById[it] },
+                        suggested = selectedTxn.suggestedCategoryId?.let { categoryById[it] },
+                        onSetCategory = { onSetCategory(selectedTxn, it) },
+                        onNewCategory = { onNewCategory(selectedTxn) },
+                        onAcceptSuggestion = { onAcceptSuggestion(selectedTxn, it) },
+                        onDismissSuggestion = { onDismissSuggestion(selectedTxn) },
+                        onManageCategories = onManageCategories,
+                    )
+                } else {
+                    ImportHistory(batches, onDeleteBatch)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TxnRow(txn: Txn, category: Category?, suggested: Category?, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.width(96.dp)) {
+                Text(formatEpochDay(txn.bookingDate), style = MaterialTheme.typography.bodySmall)
+                txn.valueDate?.let { Text("Wert ${formatEpochDay(it)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(txn.counterparty ?: txn.purpose, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    txn.bookingType?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.width(8.dp)) }
+                    when {
+                        category != null -> CategoryChip(category)
+                        suggested != null -> SuggestedChip(suggested)
+                    }
+                }
+            }
+            Text(formatCents(txn.amountCents), color = if (txn.amountCents < 0) MoneyNegative else MoneyPositive, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+internal fun CategoryChip(category: Category) {
+    val color = parseHexColor(category.color)
+    Surface(shape = RoundedCornerShape(6.dp), color = color.copy(alpha = 0.16f)) {
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
+            Dot(color)
+            Spacer(Modifier.width(4.dp))
+            Text(category.name, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun SuggestedChip(category: Category) {
+    Surface(shape = RoundedCornerShape(6.dp), color = Color.Transparent, border = BorderStroke(1.dp, parseHexColor(category.color))) {
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
+            Dot(parseHexColor(category.color))
+            Spacer(Modifier.width(4.dp))
+            Text("${category.name} ?", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun TransactionFilters(
+    search: String,
+    onSearch: (String) -> Unit,
+    filter: String,
+    onFilter: (String) -> Unit,
+    categories: List<Category>,
+    categoryById: Map<String, Category>,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = search,
+            onValueChange = onSearch,
+            placeholder = { Text("Search counterparty or purpose") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+        )
+        var menu by remember { mutableStateOf(false) }
+        Box {
+            OutlinedButton(onClick = { menu = true }) { Text("Filter: ${filterLabel(filter, categoryById)}") }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("All") }, onClick = { onFilter("ALL"); menu = false })
+                DropdownMenuItem(text = { Text("Uncategorized") }, onClick = { onFilter("NONE"); menu = false })
+                DropdownMenuItem(text = { Text("To review (suggested)") }, onClick = { onFilter("REVIEW"); menu = false })
+                HorizontalDivider()
+                categories.forEach { c ->
+                    DropdownMenuItem(
+                        text = { Row(verticalAlignment = Alignment.CenterVertically) { Dot(parseHexColor(c.color)); Spacer(Modifier.width(6.dp)); Text(c.name) } },
+                        onClick = { onFilter(c.id); menu = false },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun filterLabel(filter: String, categoryById: Map<String, Category>): String = when (filter) {
+    "ALL" -> "All"
+    "NONE" -> "Uncategorized"
+    "REVIEW" -> "To review"
+    else -> categoryById[filter]?.name ?: "Category"
+}
+
+@Composable
+private fun TxnInspector(
+    txn: Txn,
+    batch: ImportBatch?,
+    categories: List<Category>,
+    current: Category?,
+    suggested: Category?,
+    onSetCategory: (String) -> Unit,
+    onNewCategory: () -> Unit,
+    onAcceptSuggestion: (String) -> Unit,
+    onDismissSuggestion: () -> Unit,
+    onManageCategories: () -> Unit,
+) {
+    Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Transaction", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(10.dp))
+            InfoRow("Amount", formatCents(txn.amountCents))
+            InfoRow("Booking date", formatEpochDay(txn.bookingDate))
+            InfoRow("Value date", formatEpochDayOrDash(txn.valueDate))
+            txn.bookingType?.let { InfoRow("Type", it) }
+
+            Spacer(Modifier.height(12.dp))
+            Text("Category", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
+            var expanded by remember { mutableStateOf(false) }
+            Box {
+                OutlinedButton(onClick = { expanded = true }) {
+                    if (current != null) {
+                        Dot(parseHexColor(current.color)); Spacer(Modifier.width(6.dp)); Text(current.name)
+                    } else {
+                        Text("Uncategorized")
+                    }
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    // Only offer categories whose kind fits the amount's sign (income/transfer for a
+                    // credit, expense/transfer for a debit) — so a debit can't be marked as salary, etc.
+                    categories.filter { categoryAllowedForAmount(txn.amountCents, it.kind) }.forEach { c ->
+                        DropdownMenuItem(
+                            text = { Row(verticalAlignment = Alignment.CenterVertically) { Dot(parseHexColor(c.color)); Spacer(Modifier.width(6.dp)); Text(c.name) } },
+                            onClick = { expanded = false; onSetCategory(c.id) },
+                        )
+                    }
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("＋ New category…") },
+                        onClick = { expanded = false; onNewCategory() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("⚙ Manage categories…") },
+                        onClick = { expanded = false; onManageCategories() },
+                    )
+                }
+            }
+
+            if (current == null && suggested != null) {
+                Spacer(Modifier.height(8.dp))
+                Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Column(Modifier.padding(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Suggested  ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            SuggestedChip(suggested)
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Row {
+                            TextButton(onClick = { onAcceptSuggestion(suggested.id) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Accept") }
+                            TextButton(onClick = onDismissSuggestion, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Dismiss") }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Text("Purpose", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(txn.purpose, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(14.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(10.dp))
+            Text("Origin", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (batch != null) {
+                InfoRow("Source", batch.sourceName)
+                batch.statementNumber?.let { InfoRow("Statement", it) }
+                val periodStart = batch.periodStart
+                val periodEnd = batch.periodEnd
+                if (periodStart != null && periodEnd != null) {
+                    InfoRow("Period", "${formatEpochDay(periodStart)} – ${formatEpochDay(periodEnd)}")
+                }
+                InfoRow("Imported", formatEpochMillis(batch.importedAt))
+                InfoRow("Reconciled", if (batch.reconciled == 1L) "yes" else "no")
+            } else {
+                Text("—", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportHistory(batches: List<ImportBatch>, onDeleteBatch: (ImportBatch) -> Unit) {
+    Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Import history", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(10.dp))
+            if (batches.isEmpty()) {
+                Text("Nothing imported yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(batches) { b ->
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(b.sourceName, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { onDeleteBatch(b) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                                    Text("Undo", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            Text(
+                                "${b.itemCount} items · ${formatEpochMillis(b.importedAt)} · ${if (b.reconciled == 1L) "reconciled" else "unreconciled"}",
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Depot pane
+
+@Composable
+private fun DepotPane(account: Account, repo: VaultRepository, refreshKey: Int) {
+    val dates = remember(account.id, refreshKey) { repo.valuationDates(account.id) }
+    var selectedDay by remember(account.id, refreshKey) { mutableStateOf(dates.firstOrNull()) }
+    val holdings = remember(account.id, selectedDay, refreshKey) {
+        selectedDay?.let { repo.holdingsForValuationDate(account.id, it) } ?: emptyList()
+    }
+    val total = holdings.sumOf { it.marketValueCents }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Holdings", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(12.dp))
+        if (dates.isNotEmpty()) {
+            var expanded by remember { mutableStateOf(false) }
+            Box {
+                OutlinedButton(onClick = { expanded = true }) {
+                    Text("Snapshot: ${selectedDay?.let(::formatEpochDay) ?: "—"}")
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    dates.forEach { day ->
+                        DropdownMenuItem(text = { Text(formatEpochDay(day)) }, onClick = { selectedDay = day; expanded = false })
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        if (holdings.isNotEmpty()) Text(formatCents(total), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    }
+    Spacer(Modifier.height(8.dp))
+    if (holdings.isEmpty()) EmptyHint("No holdings yet. Import a Depotauszug.")
+    else LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        items(holdings) { HoldingRow(it) }
+    }
+}
+
+@Composable
+private fun HoldingRow(holding: Holding) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(holding.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOfNotNull(holding.isin, holding.wkn).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(holding.quantity, Modifier.width(90.dp), style = MaterialTheme.typography.bodySmall)
+        Text(formatCents(holding.marketValueCents), fontWeight = FontWeight.Medium)
+    }
+}

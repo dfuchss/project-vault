@@ -1,0 +1,32 @@
+-- Links accounts to profiles. A joint account is simply two (or more) rows.
+CREATE TABLE accountOwner (
+    accountId TEXT NOT NULL,
+    profileId TEXT NOT NULL,
+    share REAL NOT NULL DEFAULT 1.0,
+    PRIMARY KEY (accountId, profileId),
+    FOREIGN KEY (accountId) REFERENCES account(id) ON DELETE CASCADE,
+    FOREIGN KEY (profileId) REFERENCES profile(id) ON DELETE CASCADE
+);
+
+insertOwner:
+INSERT OR REPLACE INTO accountOwner(accountId, profileId, share) VALUES (?, ?, ?);
+
+selectOwnersForAccount:
+SELECT * FROM accountOwner WHERE accountId = ?;
+
+selectAccountsForProfile:
+SELECT account.*
+FROM account
+JOIN accountOwner ON account.id = accountOwner.accountId
+WHERE accountOwner.profileId = ?
+ORDER BY account.name;
+
+selectProfilesForAccount:
+SELECT profile.*
+FROM profile
+JOIN accountOwner ON profile.id = accountOwner.profileId
+WHERE accountOwner.accountId = ?
+ORDER BY profile.name;
+
+deleteOwnersForAccount:
+DELETE FROM accountOwner WHERE accountId = ?;

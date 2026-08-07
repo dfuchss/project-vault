@@ -1,0 +1,29 @@
+import org.fuchss.projectvault.model.CategoryKind;
+
+-- Hierarchical spending/income categories. `isSystem` (0/1) marks built-in seed categories.
+CREATE TABLE category (
+    id TEXT NOT NULL PRIMARY KEY,
+    parentId TEXT,
+    name TEXT NOT NULL,
+    kind TEXT AS CategoryKind NOT NULL,
+    icon TEXT,
+    color TEXT,
+    isSystem INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (parentId) REFERENCES category(id) ON DELETE SET NULL
+);
+
+selectAllCategories:
+SELECT * FROM category ORDER BY name;
+
+insertCategory:
+INSERT INTO category(id, parentId, name, kind, icon, color, isSystem)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+updateCategoryMeta:
+UPDATE category SET name = ?, color = ? WHERE id = ?;
+
+deleteCategory:
+DELETE FROM category WHERE id = ?;
+
+selectUserCategories:
+SELECT * FROM category WHERE isSystem = 0 ORDER BY name;

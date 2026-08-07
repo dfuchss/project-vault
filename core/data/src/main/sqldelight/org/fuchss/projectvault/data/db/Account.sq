@@ -1,0 +1,27 @@
+import org.fuchss.projectvault.model.AccountType;
+
+-- A financial account. Money is stored as integer minor units (cents) to avoid float error.
+CREATE TABLE account (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT AS AccountType NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'EUR',
+    institution TEXT,
+    iban TEXT,
+    openingBalanceCents INTEGER NOT NULL DEFAULT 0,
+    openingDate INTEGER,
+    createdAt INTEGER NOT NULL
+);
+
+selectAllAccounts:
+SELECT * FROM account ORDER BY name;
+
+selectAccount:
+SELECT * FROM account WHERE id = ?;
+
+insertAccount:
+INSERT INTO account(id, name, type, currency, institution, iban, openingBalanceCents, openingDate, createdAt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteAccount:
+DELETE FROM account WHERE id = ?;

@@ -1,0 +1,39 @@
+-- One record per imported statement file, for provenance: where an entry came from and when.
+-- `endBalanceCents` holds the statement's closing balance (transactions) or total value (depot).
+CREATE TABLE importBatch (
+    id TEXT NOT NULL PRIMARY KEY,
+    accountId TEXT NOT NULL,
+    kind TEXT NOT NULL,              -- TRANSACTIONS | DEPOT
+    sourceName TEXT NOT NULL,        -- original file name
+    institution TEXT,
+    statementNumber TEXT,
+    periodStart INTEGER,
+    periodEnd INTEGER,
+    valuationDate INTEGER,           -- depot snapshot date
+    endBalanceCents INTEGER,         -- closing balance / total value
+    reconciled INTEGER NOT NULL,     -- 1 if the integrity check passed
+    importedAt INTEGER NOT NULL,
+    itemCount INTEGER NOT NULL,
+    FOREIGN KEY (accountId) REFERENCES account(id) ON DELETE CASCADE
+);
+
+CREATE INDEX importBatch_account ON importBatch(accountId);
+
+selectBatchesForAccount:
+SELECT * FROM importBatch WHERE accountId = ? ORDER BY importedAt DESC;
+
+selectBatch:
+SELECT * FROM importBatch WHERE id = ?;
+
+insertBatch:
+INSERT INTO importBatch(id, accountId, kind, sourceName, institution, statementNumber, periodStart, periodEnd, valuationDate, endBalanceCents, reconciled, importedAt, itemCount)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+latestBatchForAccount:
+SELECT * FROM importBatch WHERE accountId = ? ORDER BY importedAt DESC LIMIT 1;
+
+deleteBatch:
+DELETE FROM importBatch WHERE id = ?;
+
+deleteBatchesByAccount:
+DELETE FROM importBatch WHERE accountId = ?;

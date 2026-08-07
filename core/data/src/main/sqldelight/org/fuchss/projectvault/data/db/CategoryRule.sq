@@ -1,0 +1,25 @@
+-- Keyword → category rules. SEED rules ship with the vault; USER rules are learned from corrections
+-- (higher priority, so they win).
+CREATE TABLE categoryRule (
+    id TEXT NOT NULL PRIMARY KEY,
+    keyword TEXT NOT NULL,
+    categoryId TEXT NOT NULL,
+    priority INTEGER NOT NULL,
+    source TEXT NOT NULL,            -- SEED | USER
+    createdAt INTEGER NOT NULL
+);
+
+selectAllRules:
+SELECT * FROM categoryRule ORDER BY priority DESC;
+
+insertRule:
+INSERT INTO categoryRule(id, keyword, categoryId, priority, source, createdAt) VALUES (?, ?, ?, ?, ?, ?);
+
+deleteUserRuleByKeyword:
+DELETE FROM categoryRule WHERE keyword = ? AND source = 'USER';
+
+deleteRuleById:
+DELETE FROM categoryRule WHERE id = ?;
+
+deleteRulesByCategory:
+DELETE FROM categoryRule WHERE categoryId = ?;

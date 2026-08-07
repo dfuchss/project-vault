@@ -1,0 +1,42 @@
+-- A securities position for a DEPOT account. Holdings are kept as DATED SNAPSHOTS (one set per
+-- valuationDate) so a portfolio can be traced over time; re-importing the same Depotauszug replaces
+-- only that date's snapshot. Quantity/price kept as text (fractional shares, >2-decimal prices);
+-- market value is integer cents.
+CREATE TABLE holding (
+    id TEXT NOT NULL PRIMARY KEY,
+    accountId TEXT NOT NULL,
+    importBatchId TEXT,
+    isin TEXT,
+    wkn TEXT,
+    name TEXT NOT NULL,
+    quantity TEXT NOT NULL,
+    priceText TEXT,
+    marketValueCents INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'EUR',
+    valuationDate INTEGER,
+    FOREIGN KEY (accountId) REFERENCES account(id) ON DELETE CASCADE
+);
+
+CREATE INDEX holding_account ON holding(accountId);
+
+selectHoldingsForValuationDate:
+SELECT * FROM holding WHERE accountId = ? AND valuationDate = ? ORDER BY marketValueCents DESC;
+
+latestValuationDate:
+SELECT MAX(valuationDate) AS latest FROM holding WHERE accountId = ?;
+
+valuationDates:
+SELECT DISTINCT valuationDate FROM holding WHERE accountId = ? AND valuationDate IS NOT NULL ORDER BY valuationDate DESC;
+
+deleteHoldingsForValuationDate:
+DELETE FROM holding WHERE accountId = ? AND valuationDate = ?;
+
+deleteHoldingsByBatch:
+DELETE FROM holding WHERE importBatchId = ?;
+
+deleteHoldingsByAccount:
+DELETE FROM holding WHERE accountId = ?;
+
+insertHolding:
+INSERT INTO holding(id, accountId, importBatchId, isin, wkn, name, quantity, priceText, marketValueCents, currency, valuationDate)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

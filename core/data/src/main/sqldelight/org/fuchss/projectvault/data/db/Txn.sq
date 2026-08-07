@@ -1,0 +1,66 @@
+-- A booked transaction on an account. (`txn`, not `transaction`, which is a SQL keyword.)
+-- Money is integer cents; dates are stored as epoch-day integers.
+CREATE TABLE txn (
+    id TEXT NOT NULL PRIMARY KEY,
+    accountId TEXT NOT NULL,
+    bookingDate INTEGER NOT NULL,
+    valueDate INTEGER,
+    amountCents INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'EUR',
+    counterparty TEXT,
+    purpose TEXT NOT NULL,
+    bookingType TEXT,
+    categoryId TEXT,
+    categorySource TEXT,            -- MANUAL | USER_RULE | SEED_RULE (how the committed category was set)
+    suggestedCategoryId TEXT,       -- a Tier-2 embedding proposal awaiting the user's confirmation
+    importBatchId TEXT,
+    dedupHash TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    FOREIGN KEY (accountId) REFERENCES account(id) ON DELETE CASCADE
+);
+
+CREATE INDEX txn_account ON txn(accountId);
+-- De-duplication: re-importing an overlapping statement must never create duplicates.
+CREATE UNIQUE INDEX txn_dedup ON txn(accountId, dedupHash);
+
+selectTxnsForAccount:
+SELECT * FROM txn WHERE accountId = ? ORDER BY bookingDate DESC, id;
+
+countTxnsForAccount:
+SELECT COUNT(*) FROM txn WHERE accountId = ?;
+
+sumAmountForAccount:
+SELECT COALESCE(SUM(amountCents), 0) FROM txn WHERE accountId = ?;
+
+dedupHashesForAccount:
+SELECT dedupHash FROM txn WHERE accountId = ?;
+
+deleteTxnsByBatch:
+DELETE FROM txn WHERE importBatchId = ?;
+
+deleteTxnsByAccount:
+DELETE FROM txn WHERE accountId = ?;
+
+insertTxn:
+INSERT OR IGNORE INTO txn(id, accountId, bookingDate, valueDate, amountCents, currency, counterparty, purpose, bookingType, categoryId, categorySource, suggestedCategoryId, importBatchId, dedupHash, createdAt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateTxnCategory:
+UPDATE txn SET categoryId = ?, categorySource = ? WHERE id = ?;
+
+setSuggestion:
+UPDATE txn SET suggestedCategoryId = ? WHERE id = ?;
+
+clearSuggestion:
+UPDATE txn SET suggestedCategoryId = NULL WHERE id = ?;
+
+-- Used when a category is deleted: drop its committed/suggested references so nothing dangles.
+clearCategoryReferences:
+UPDATE txn SET categoryId = NULL, categorySource = NULL WHERE categoryId = ?;
+
+clearSuggestionReferences:
+UPDATE txn SET suggestedCategoryId = NULL WHERE suggestedCategoryId = ?;
+
+sumByCategoryForAccount:
+SELECT categoryId, SUM(amountCents) AS total, COUNT(*) AS count
+FROM txn WHERE accountId = ? GROUP BY categoryId;

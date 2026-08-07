@@ -1,0 +1,19 @@
+-- Single-row table describing the vault itself (schema version, base currency, timestamps).
+CREATE TABLE vaultMeta (
+    id INTEGER NOT NULL PRIMARY KEY,
+    schemaVersion INTEGER NOT NULL,
+    appVersion TEXT NOT NULL,
+    baseCurrency TEXT NOT NULL DEFAULT 'EUR',
+    createdAt INTEGER NOT NULL,
+    modifiedAt INTEGER NOT NULL
+);
+
+selectMeta:
+SELECT * FROM vaultMeta WHERE id = 1;
+
+insertMeta:
+INSERT INTO vaultMeta(id, schemaVersion, appVersion, baseCurrency, createdAt, modifiedAt)
+VALUES (1, ?, ?, ?, ?, ?);
+
+touchModified:
+UPDATE vaultMeta SET modifiedAt = ? WHERE id = 1;

@@ -1,0 +1,30 @@
+-- User-defined recurring series the detector can't infer (e.g. an annual insurance the statements
+-- don't span yet, or a subscription the user wants to track before it appears). These are authored
+-- by hand and merged with the auto-detected series on the dashboard and in the forecast.
+-- `cadence` stores a Cadence enum name (MONTHLY/QUARTERLY/YEARLY); `amountCents` is signed
+-- (negative = expense); `nextDate` is an epoch-day integer.
+CREATE TABLE recurringManual (
+    id          TEXT NOT NULL PRIMARY KEY,
+    label       TEXT NOT NULL,
+    categoryId  TEXT,
+    cadence     TEXT NOT NULL,
+    amountCents INTEGER NOT NULL,
+    nextDate    INTEGER NOT NULL,
+    createdAt   INTEGER NOT NULL
+);
+
+selectAllManual:
+SELECT * FROM recurringManual ORDER BY createdAt;
+
+insertManual:
+INSERT INTO recurringManual(id, label, categoryId, cadence, amountCents, nextDate, createdAt)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+updateManual:
+UPDATE recurringManual SET label = ?, categoryId = ?, cadence = ?, amountCents = ?, nextDate = ? WHERE id = ?;
+
+deleteManual:
+DELETE FROM recurringManual WHERE id = ?;
+
+clearCategoryReferences:
+UPDATE recurringManual SET categoryId = NULL WHERE categoryId = ?;

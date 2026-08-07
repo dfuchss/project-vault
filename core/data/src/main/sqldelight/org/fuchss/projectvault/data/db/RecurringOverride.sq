@@ -1,0 +1,19 @@
+-- User overrides for auto-detected recurring series, keyed by the analytics merchant key.
+-- `label` renames a detected series (e.g. "SATURN" -> "Apple Care Plus"); `hidden` removes a
+-- false positive from the recurring list. Recurring series themselves are computed on the fly.
+CREATE TABLE recurringOverride (
+    merchantKey TEXT NOT NULL PRIMARY KEY,
+    label       TEXT,
+    hidden      INTEGER NOT NULL DEFAULT 0,
+    createdAt   INTEGER NOT NULL
+);
+
+selectAllOverrides:
+SELECT * FROM recurringOverride;
+
+upsertOverride:
+INSERT OR REPLACE INTO recurringOverride(merchantKey, label, hidden, createdAt)
+VALUES (?, ?, ?, ?);
+
+deleteOverride:
+DELETE FROM recurringOverride WHERE merchantKey = ?;
