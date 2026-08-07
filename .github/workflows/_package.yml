@@ -1,0 +1,76 @@
+name: Package distributables (reusable)
+
+# Builds native distributables on each OS and normalizes them into dist/ with stable
+# asset names, then uploads them as workflow artifacts. Called by both build.yml (push
+# to main) and release.yml (attach to a published release) so packaging never drifts.
+#
+#   macOS   -> ProjectVault-macos-arm64.dmg      (Compose packageDmg)
+#   Windows -> ProjectVault-windows-x64.zip       (createDistributable app-image, zipped)
+#   Linux   -> ProjectVault-linux-x86_64.AppImage (createDistributable app-image -> AppImage)
+
+on:
+  workflow_call: {}
+
+jobs:
+  package:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest       # Apple Silicon -> the DMG is arm64-only
+            name: macos
+            gradle_task: ":app:packageDmg"
+          - os: windows-latest
+            name: windows
+            gradle_task: ":app:createDistributable"
+          - os: ubuntu-latest
+            name: linux
+            gradle_task: ":app:createDistributable"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # CLAUDE.md: Compose Multiplatform must build on JDK 21 (Temurin), not 25/26.
+      - name: Set up Temurin JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # This also fetches the ~128MB bundled embedding model from HuggingFace on a fresh
+      # runner (fetchEmbeddingModel) so the packaged app ships Tier-2 classification.
+      - name: Build distributable
+        shell: bash
+        run: ./gradlew --no-daemon ${{ matrix.gradle_task }}
+
+      - name: Collect DMG (macOS)
+        if: matrix.name == 'macos'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/compose/binaries/main/dmg/*.dmg "dist/ProjectVault-macos-arm64.dmg"
+
+      - name: Zip portable app (Windows)
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "app/build/compose/binaries/main/app/Project Vault" `
+            -DestinationPath "dist/ProjectVault-windows-x64.zip" -Force
+
+      - name: Build AppImage (Linux)
+        if: matrix.name == 'linux'
+        shell: bash
+        run: bash .github/scripts/build-appimage.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.name }}
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error

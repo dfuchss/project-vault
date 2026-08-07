@@ -1,0 +1,39 @@
+name: Release
+
+# When a GitHub Release is published, build the distributables and attach them to that
+# release. Can also be run manually against an existing tag via the Actions tab.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to attach binaries to (e.g. v1.0.0)
+        required: true
+
+jobs:
+  package:
+    uses: ./.github/workflows/_package.yml
+
+  upload:
+    name: Attach binaries to release
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          find artifacts -type f -print0 | while IFS= read -r -d '' f; do
+            echo "Uploading $f"
+            gh release upload "$TAG" "$f" --clobber
+          done

@@ -1,0 +1,17 @@
+name: Build
+
+# Build native distributables on every push to main and attach them as workflow
+# artifacts (downloadable for 14 days from the run's summary page).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push to main supersedes an in-flight build.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    uses: ./.github/workflows/_package.yml

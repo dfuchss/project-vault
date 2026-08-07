@@ -1,6 +1,8 @@
 # Gradle
 .gradle/
 build/
+# CI packaging output (normalized distributables)
+/dist/
 !gradle/wrapper/gradle-wrapper.jar
 .kotlin/
 
