@@ -30,17 +30,19 @@ class RuleEngine(private val rules: List<CategoryRule>) {
 
     fun categorize(text: String): String? = bestRule(text)?.categoryId
 
-    private fun normalize(text: String): String = text.uppercase()
+    // Fold diacritics (ö→oe, é→e, …) and upper-case, so umlaut spelling never affects a match.
+    private fun normalize(text: String): String = TextNormalizer.fold(text)
 
     companion object {
         /**
          * Derives a stable keyword from a transaction's counterparty for a learned USER rule — the
          * first alphanumeric token of length ≥ 3 (e.g. "REWE.Rene.Mueller/…" → "REWE"), else the
-         * whole trimmed string.
+         * whole trimmed string. Diacritics are folded first so `DÖNER` yields `DOENER`, not `D`/`NER`.
          */
         fun keywordFor(counterparty: String): String {
-            val token = counterparty.split(Regex("[^A-Za-z0-9]+")).firstOrNull { it.length >= 3 }
-            return (token ?: counterparty.trim()).uppercase()
+            val folded = TextNormalizer.fold(counterparty)
+            val token = folded.split(Regex("[^A-Za-z0-9]+")).firstOrNull { it.length >= 3 }
+            return token ?: folded.trim()
         }
     }
 }

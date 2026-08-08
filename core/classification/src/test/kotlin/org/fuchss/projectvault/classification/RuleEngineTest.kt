@@ -85,4 +85,23 @@ class RuleEngineTest {
         assertEquals("AMZN", RuleEngine.keywordFor("AMZN.Mktp.DE.JN0PS5SL5"))
         assertEquals("TELECOM", RuleEngine.keywordFor("1+1 Telecom GmbH"))
     }
+
+    @Test
+    fun `diacritics fold so umlaut spelling does not affect matching`() {
+        val e = RuleEngine(SeedCatalog.rules)
+        // Seed keyword is the ASCII "DOENER"; the umlaut spelling still matches after folding.
+        assertEquals("cat-restaurants", e.categorize("Döner Imbiss Musterstadt"))
+        // And the reverse: an ASCII-spelled BAFOEG text against the (now single) seed keyword.
+        assertEquals("cat-income", e.categorize("BAFOEG Amt fuer Ausbildungsfoerderung"))
+        assertEquals("cat-income", e.categorize("BAföG Amt für Ausbildungsförderung"))
+        // A user rule with an umlaut keyword matches an ASCII-spelled transaction and vice versa.
+        val rules = listOf(CategoryRule("MÜLLER", "cat-drugstore", 100, RuleSource.USER))
+        assertEquals("cat-drugstore", RuleEngine(rules).categorize("MUELLER Drogeriemarkt"))
+    }
+
+    @Test
+    fun `keywordFor folds diacritics into an ascii token`() {
+        assertEquals("DOENER", RuleEngine.keywordFor("Döner Palast"))
+        assertEquals("MUELLER", RuleEngine.keywordFor("Müller Handels GmbH"))
+    }
 }

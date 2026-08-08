@@ -13,9 +13,6 @@ Think *Finanzguru*, but nothing ever leaves your machine.
 
 ![Project Vault dashboard](docs/screenshots/dashboard.png)
 
-> Every screenshot here is generated automatically from **synthetic** data by a UI test
-> (`app/.../ScreenshotTest.kt`) — it doubles as a render smoke test and never contains real data.
-
 ---
 
 ## Why it's different

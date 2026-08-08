@@ -145,6 +145,9 @@ internal fun DashboardScreen(
     }
     val isExpectedIncome = sel != null && incomeExpense.incomeCents == 0L && lastMonthSalary != null
     val displayedIncome = if (isExpectedIncome) lastMonthSalary!! else incomeExpense.incomeCents
+    // Net is derived from income, so once income is an estimate the net is one too — otherwise the row
+    // would show an estimated income next to a net that still assumes zero income.
+    val displayedNet = if (isExpectedIncome) displayedIncome - incomeExpense.expenseCents else incomeExpense.netCents
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -170,7 +173,7 @@ internal fun DashboardScreen(
             // so a long "Expected income" label never widens the card.
             StatCard(strings.income, formatCents(displayedIncome), Modifier.weight(1f), MoneyPositive, estimated = isExpectedIncome)
             StatCard(strings.expense, formatCents(incomeExpense.expenseCents), Modifier.weight(1f), MoneyNegative)
-            StatCard(strings.net, formatCents(incomeExpense.netCents), Modifier.weight(1f))
+            StatCard(strings.net, formatCents(displayedNet), Modifier.weight(1f), estimated = isExpectedIncome)
         }
 
         Spacer(Modifier.height(16.dp))

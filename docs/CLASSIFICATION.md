@@ -6,14 +6,26 @@ rules are scoped and corrected per vault (a vault = one "project").
 ## Tiers
 
 1. **Tier 1 — keyword rules** (`:core:classification` `RuleEngine`). Deterministic, offline,
-   explainable. Two sources of rules:
-   - **SEED** rules ship with every vault (`SeedCatalog`: ~15 categories + common German merchants).
+   explainable. Text is diacritics-folded before matching (`TextNormalizer`: `ö→oe`, `é→e`, …), so
+   umlaut spelling never affects a match. Two sources of rules:
+   - **SEED** rules ship with every vault (`SeedCatalog`: ~19 categories + common German merchants).
    - **USER** rules are learned from your corrections (higher priority — they win over SEED).
-2. **Tier 2 — semantic embeddings** (`EmbeddingClassifier`). For transactions no rule matches, an
-   embedding model scores the transaction text against category *prototypes* (zero-shot) and your
-   past categorizations (few-shot). The nearest above a confidence threshold is offered as a
-   **suggestion to confirm — it never auto-commits** (rules are reliable and commit; embeddings are a
-   proposal). Runs only if an embedding model is available; otherwise it is skipped.
+2. **Tier 2 — suggestions from two complementary models.** For transactions no rule matches, Tier 2
+   *proposes* a category — a **suggestion to confirm, it never auto-commits** (rules are reliable and
+   commit; Tier 2 only proposes):
+   - **Statistical** (`StatisticalClassifier`) — **always on**. A lightweight TF-IDF + multinomial
+     Naive Bayes model trained **on-device** from your labeled transactions plus the seed keywords, so
+     it learns the vocabulary of *your* merchants. No bundled model, no download; retrained in-memory
+     on each pass.
+   - **Semantic embeddings** (`EmbeddingClassifier`) — only when an embedding model is provisioned.
+     Scores the text against category *prototypes* (zero-shot) and your past categorizations (few-shot)
+     by cosine similarity.
+   When both run they are **merged** (`Categorizer.mergeSuggestion`): if they agree that category wins;
+   if they disagree the higher-confidence proposal wins; if only one fires it is used. The embedding
+   model is bundled and loads on first classify, so both normally run; a build without it falls back to
+   the statistical model alone. On the `ClassifierComparisonTest` benchmark embeddings give much higher
+   coverage at near-equal precision, so the merge usually resolves to the embedding proposal — the
+   statistical model is the always-on fallback and a high-precision cross-check.
 3. **Tier 3 — local LLM (Ollama)** — optional, future; for the genuinely ambiguous remainder.
 
 ## How a category is chosen
@@ -32,13 +44,14 @@ Within Tier 1, the winning rule is the highest **priority** (USER > SEED), then 
 appears **earliest** in the text (merchant names lead the counterparty, so `REWE` beats a later
 `MUELLER`), then the **longest** keyword (`Amazon Prime` beats `Prime`).
 
-### Proposals (embeddings)
+### Proposals (Tier 2)
 
-A Tier-2 guess is stored separately in `txn.suggestedCategoryId` — a **proposal**, not a committed
-category. Proposals do **not** count in the dashboard and are shown as a dimmed "?" chip. In the
-transaction inspector you **Accept** (commits it, and learns a USER rule like a manual correction) or
-**Dismiss** it (leaves the transaction uncategorized). This keeps low-confidence guesses out of your
-data until you confirm them — rules stay authoritative, embeddings only assist.
+A Tier-2 guess (statistical and/or embedding, merged) is stored separately in `txn.suggestedCategoryId`
+— a **proposal**, not a committed category. Proposals do **not** count in the dashboard and are shown
+as a dimmed "?" chip. In the transaction inspector you **Accept** (commits it, and learns a USER rule
+like a manual correction) or **Dismiss** it (leaves the transaction uncategorized). This keeps
+low-confidence guesses out of your data until you confirm them — rules stay authoritative, Tier 2 only
+assists.
 
 A credit-card statement's settlement debited from the giro (`…KREDITKARTENABRECHNUNG…`) is seeded as a
 **transfer**, so paying the card isn't double-counted as spending (the card's own transactions are).
@@ -95,8 +108,14 @@ once per vault on first open.
 
 - Keyword derivation is a heuristic; an over-generic learned keyword can over-match. Mitigations:
   earliest-match ordering, and (planned) the rule editor to prune bad keywords.
-- Tier 2 requires an embedding model. The classifier logic is complete and tested; provisioning the
-  model (a small multilingual ONNX bundled with the app, or downloaded on first use) is the remaining
-  step for Tier 2 to activate. Until then the app runs Tier 1 only — fully functional.
-- Confidence threshold (`EmbeddingClassifier.minSimilarity`) trades precision vs. coverage; start
-  conservative so embeddings only fill high-confidence gaps and leave the rest for you.
+- The **statistical** Tier-2 model needs enough labeled data to generalize — a brand-new vault leans on
+  the seed keywords until you've corrected a few transactions, after which it learns your merchants.
+- The **embedding** Tier-2 model (a small multilingual ONNX, ~118 MB) is bundled and loads on first
+  classify, so the first import is slower; a build without the model falls back to the statistical
+  model alone — still fully functional.
+- Confidence thresholds trade precision vs. coverage: `StatisticalClassifier.minConfidence` (a
+  margin-based score, default 0.65) and `EmbeddingClassifier.minSimilarity` (cosine, default 0.62).
+  `ClassifierComparisonTest` prints the precision/coverage curve across thresholds for both models —
+  the harness used to pick the defaults, and the place to re-tune against real data. Note the embedding
+  cosines cluster high on the synthetic fixture (the σ sweep barely moves), so `minSimilarity` is not
+  very selective there; expect lower embedding precision on genuinely out-of-taxonomy transactions.

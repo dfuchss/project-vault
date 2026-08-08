@@ -7,6 +7,7 @@ import org.fuchss.projectvault.classification.NoopEmbedder
 import org.fuchss.projectvault.classification.RuleEngine
 import org.fuchss.projectvault.classification.RuleSource
 import org.fuchss.projectvault.classification.SeedCatalog
+import org.fuchss.projectvault.classification.StatisticalClassifier
 import org.fuchss.projectvault.data.VaultRepository
 import org.fuchss.projectvault.data.db.Txn
 import org.fuchss.projectvault.model.AccountType
@@ -34,8 +35,9 @@ internal const val CAT_OTHER = "cat-other"
 
 /**
  * Transaction categorization wired to the vault. Tier 1 = keyword rules (seed + learned USER rules);
- * Tier 2 = semantic embeddings for what the rules miss (only if an [Embedder] is available). Manual
- * corrections are sticky and are learned as USER rules that propagate. See docs/CLASSIFICATION.md.
+ * Tier 2 = two complementary suggesters for what the rules miss — an always-on statistical classifier
+ * trained from your labeled transactions, plus semantic embeddings when an [Embedder] is provisioned.
+ * Manual corrections are sticky and are learned as USER rules that propagate. See docs/CLASSIFICATION.md.
  */
 class Categorizer(
     private val repo: VaultRepository,
@@ -88,9 +90,9 @@ class Categorizer(
     }
 
     /**
-     * Tier 1 rules **commit** categories (they're reliable); Tier 2 embeddings only **suggest** them
-     * (reviewable, so a wrong guess never silently commits or counts). Never touches transactions that
-     * already have a committed category. Returns how many were committed vs. suggested.
+     * Tier 1 rules **commit** categories (they're reliable); Tier 2 only **suggests** them (reviewable,
+     * so a wrong guess never silently commits or counts). Never touches transactions that already have
+     * a committed category. Returns how many were committed vs. suggested.
      */
     fun classifyAccount(accountId: String): ClassifyResult {
         // Savings/deposit accounts: flows are internal movements, so default to a transfer, with
@@ -115,44 +117,83 @@ class Categorizer(
                 committed++
             }
         }
-        val suggested = if (embedder.available()) suggestByEmbeddings(accountId) else 0
+        val suggested = suggest(accountId)
         return ClassifyResult(committed, suggested)
     }
 
-    /** Sets an embedding **suggestion** on uncategorized transactions without one. Returns the count. */
-    private fun suggestByEmbeddings(accountId: String): Int {
+    /**
+     * Sets a Tier-2 **suggestion** on uncategorized transactions that have none, from two complementary
+     * models: an always-on statistical classifier trained from your labeled transactions, plus the
+     * semantic embedder when a model is provisioned. Neither commits — suggestions are reviewed in the
+     * inspector. Returns how many were suggested.
+     */
+    private fun suggest(accountId: String): Int {
         val needsSuggestion = repo.transactions(accountId)
             .filter { it.categoryId == null && it.suggestedCategoryId == null }
         if (needsSuggestion.isEmpty()) return 0
 
-        // Only enabled categories can be suggested — disabled ones are dropped from both the zero-shot
-        // prototypes and the few-shot examples.
+        // Only enabled categories can be suggested — disabled ones are dropped from every model's inputs.
         val enabled = enabledCategoryIds()
         val categories = repo.categories().filter { it.enabled == 1L }
-        val keywordsByCategory = repo.categoryRules().groupBy { it.categoryId }
+        val keywordsByCategory = repo.categoryRules().filter { it.categoryId in enabled }.groupBy { it.categoryId }
         val examples = repo.transactions(accountId).filter { it.categoryId != null && it.categoryId in enabled }
 
-        // Zero-shot prototypes (category name + its keywords) + few-shot examples (committed categories).
+        val statistical = buildStatisticalClassifier(categories, keywordsByCategory, examples)
+        val embeddingClassifier = if (embedder.available()) buildEmbeddingClassifier(categories, keywordsByCategory, examples) else null
+        val queryVectors = if (embeddingClassifier != null) embedder.embed(needsSuggestion.map { textOf(it) }) else emptyList()
+
+        var suggested = 0
+        needsSuggestion.forEachIndexed { i, txn ->
+            val stat = statistical.classify(textOf(txn))?.let { it.categoryId to it.confidence.toFloat() }
+            val emb = embeddingClassifier?.classify(queryVectors[i])?.let { it.categoryId to it.similarity }
+            mergeSuggestion(stat, emb)?.let {
+                repo.setSuggestedCategory(txn.id, it)
+                suggested++
+            }
+        }
+        return suggested
+    }
+
+    /**
+     * Complement policy (tuned by ClassifierComparisonTest): if both models produce a proposal and
+     * **agree**, use it (agreement is strong); if they disagree, take the higher-confidence one; if only
+     * one produced a proposal, use it. Embeddings are the higher-coverage suggester when the model is
+     * loaded; the statistical classifier is the always-on fallback and a high-precision cross-check.
+     */
+    private fun mergeSuggestion(stat: Pair<String, Float>?, emb: Pair<String, Float>?): String? = when {
+        stat != null && emb != null -> if (stat.first == emb.first || stat.second >= emb.second) stat.first else emb.first
+        else -> (stat ?: emb)?.first
+    }
+
+    /** Statistical model input: seed keywords + category names as cold-start docs, plus your labels. */
+    private fun buildStatisticalClassifier(
+        categories: List<org.fuchss.projectvault.data.db.Category>,
+        keywordsByCategory: Map<String, List<org.fuchss.projectvault.data.db.CategoryRule>>,
+        examples: List<Txn>,
+    ): StatisticalClassifier {
+        val seedDocs = categories.flatMap { c ->
+            (listOf(c.name) + keywordsByCategory[c.id].orEmpty().map { it.keyword })
+                .map { StatisticalClassifier.Example(it, c.id) }
+        }
+        val labeled = examples.map { StatisticalClassifier.Example(textOf(it), it.categoryId!!) }
+        return StatisticalClassifier(seedDocs + labeled)
+    }
+
+    /** Embedding model input: zero-shot prototypes (name + keywords) + few-shot committed examples. */
+    private fun buildEmbeddingClassifier(
+        categories: List<org.fuchss.projectvault.data.db.Category>,
+        keywordsByCategory: Map<String, List<org.fuchss.projectvault.data.db.CategoryRule>>,
+        examples: List<Txn>,
+    ): EmbeddingClassifier {
         val prototypeTexts = categories.map { c ->
             (listOf(c.name) + keywordsByCategory[c.id].orEmpty().map { it.keyword }).joinToString(" ")
         }
         val exampleTexts = examples.map { textOf(it) }
         val prototypeVectors = if (prototypeTexts.isNotEmpty()) embedder.embed(prototypeTexts) else emptyList()
         val exampleVectors = if (exampleTexts.isNotEmpty()) embedder.embed(exampleTexts) else emptyList()
-
         val labeled = categories.mapIndexed { i, c -> EmbeddingClassifier.Labeled(c.id, prototypeVectors[i]) } +
             examples.mapIndexed { i, t -> EmbeddingClassifier.Labeled(t.categoryId!!, exampleVectors[i]) }
-        val classifier = EmbeddingClassifier(labeled)
-
-        val queries = embedder.embed(needsSuggestion.map { textOf(it) })
-        var suggested = 0
-        needsSuggestion.forEachIndexed { i, txn ->
-            classifier.classify(queries[i])?.let {
-                repo.setSuggestedCategory(txn.id, it.categoryId)
-                suggested++
-            }
-        }
-        return suggested
+        return EmbeddingClassifier(labeled)
     }
 
     /** Accepts an embedding suggestion: commits it (learning + propagating like a manual set). */
