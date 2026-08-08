@@ -1,5 +1,6 @@
 package org.fuchss.projectvault.app
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -12,7 +13,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,19 +47,41 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
 @Composable
-internal fun StatCard(label: String, value: String, modifier: Modifier = Modifier, valueColor: Color = Color.Unspecified) {
-    Card(shape = RoundedCornerShape(14.dp), modifier = modifier) {
+internal fun StatCard(label: String, value: String, modifier: Modifier = Modifier, valueColor: Color = Color.Unspecified, estimated: Boolean = false) {
+    // An "estimated" card (e.g. expected income) is visually set apart: a tinted container, a primary
+    // outline, an "≈ EST" tag and a "≈" prefix on the value, so the number never reads as an actual.
+    val accent = MaterialTheme.colorScheme.primary
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        modifier = modifier,
+        border = if (estimated) BorderStroke(1.dp, accent.copy(alpha = 0.5f)) else null,
+        colors = if (estimated) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)) else CardDefaults.cardColors(),
+    ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-            Text(
-                label.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    label.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                if (estimated) {
+                    Spacer(Modifier.width(6.dp))
+                    Surface(shape = RoundedCornerShape(4.dp), color = accent.copy(alpha = 0.16f)) {
+                        Text(
+                            "≈ EST",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = accent,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(8.dp))
             Text(
-                value,
+                if (estimated) "≈ $value" else value,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = valueColor,

@@ -47,7 +47,6 @@ import org.fuchss.projectvault.data.ManualRecurring
 import org.fuchss.projectvault.data.VaultRepository
 import org.fuchss.projectvault.data.db.Account
 import org.fuchss.projectvault.data.db.Category
-import org.fuchss.projectvault.model.CategoryKind
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.math.roundToLong
@@ -78,6 +77,13 @@ internal fun DashboardScreen(
         val detectedVisible = detected.filterNot { overrides[it.merchantKey]?.hidden == true }
         (detectedVisible + manual.map { it.toSeries() }).sortedByDescending { kotlin.math.abs(it.typicalAmountCents) }
     }
+    // Detected series the user hid — surfaced behind a "N hidden" affordance so they can be un-hidden.
+    val hiddenDetected = remember(detected, overrides) {
+        detected.filter { overrides[it.merchantKey]?.hidden == true }
+            .sortedByDescending { kotlin.math.abs(it.typicalAmountCents) }
+    }
+    var showingHidden by remember { mutableStateOf(false) }
+    var showAllRecurring by remember { mutableStateOf(false) }
     var editingRecurring by remember { mutableStateOf<RecurringSeries?>(null) }
     var editingManual by remember { mutableStateOf<ManualRecurring?>(null) }
     var addingRecurring by remember { mutableStateOf(false) }
@@ -111,19 +117,8 @@ internal fun DashboardScreen(
     // mean ± std dev — used to make the forecast realistic and to draw its uncertainty band.
     val variable = remember(analyticsTxns, detected) { Recurring.variableMonthlySpending(analyticsTxns, detected) }
     val months = remember(analyticsTxns) { analyticsTxns.map { YearMonth.from(it.date) }.distinct().sortedDescending() }
-    // Default to the latest month — but if that's the still-running calendar month and no income has
-    // landed yet (salary often only arrives ~mid/late month), fall back to the most recent month that
-    // does have income. Otherwise the overview of an unfinished month looks like all-expense-no-income.
-    val defaultMonth = remember(months, analyticsTxns) {
-        val latest = months.firstOrNull()
-        val incomeMonths = analyticsTxns
-            .filter { it.kind != CategoryKind.TRANSFER && it.amountCents > 0 }
-            .mapTo(HashSet()) { YearMonth.from(it.date) }
-        if (latest != null && latest == YearMonth.now() && latest !in incomeMonths)
-            months.firstOrNull { it in incomeMonths } ?: months.getOrElse(1) { latest }
-        else latest
-    }
-    var selectedMonth by remember(months) { mutableStateOf(defaultMonth) }
+    // Default to the latest month that has any entries (months is sorted descending).
+    var selectedMonth by remember(months) { mutableStateOf(months.firstOrNull()) }
     val periodTxns = remember(analyticsTxns, selectedMonth) {
         val m = selectedMonth
         if (m == null) analyticsTxns else analyticsTxns.filter { YearMonth.from(it.date) == m }
@@ -134,6 +129,21 @@ internal fun DashboardScreen(
     val incomeExpense = remember(periodTxns) { Analytics.incomeExpense(periodTxns) }
     val byCategory = remember(periodTxns) { Analytics.spendingByCategory(periodTxns) }
     val monthly = remember(analyticsTxns) { Analytics.monthlyCashflow(analyticsTxns) }
+
+    // Salary by month, so that a (partial) month with no income yet can show an approximation instead
+    // of appearing as all-expense-no-income: we carry over the **salary** of the most recent earlier
+    // month that had one (only paychecks, not one-off/other income). Labelled "Expected income".
+    val salaryByMonth = remember(analyticsTxns) {
+        analyticsTxns.filter { it.categoryId == CAT_SALARY && it.amountCents > 0 }
+            .groupBy { YearMonth.from(it.date) }
+            .mapValues { (_, l) -> l.sumOf { it.amountCents } }
+    }
+    val sel = selectedMonth
+    val lastMonthSalary = remember(salaryByMonth, sel) {
+        if (sel != null) salaryByMonth.filterKeys { it < sel }.maxByOrNull { it.key }?.value else null
+    }
+    val isExpectedIncome = sel != null && incomeExpense.incomeCents == 0L && lastMonthSalary != null
+    val displayedIncome = if (isExpectedIncome) lastMonthSalary!! else incomeExpense.incomeCents
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -155,7 +165,7 @@ internal fun DashboardScreen(
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             StatCard("Net worth", formatCents(netWorth), Modifier.weight(1f))
-            StatCard("Income", formatCents(incomeExpense.incomeCents), Modifier.weight(1f), MoneyPositive)
+            StatCard(if (isExpectedIncome) "Expected income" else "Income", formatCents(displayedIncome), Modifier.weight(1f), MoneyPositive, estimated = isExpectedIncome)
             StatCard("Expense", formatCents(incomeExpense.expenseCents), Modifier.weight(1f), MoneyNegative)
             StatCard("Net", formatCents(incomeExpense.netCents), Modifier.weight(1f))
         }
@@ -251,13 +261,19 @@ internal fun DashboardScreen(
                         Text("tap to edit", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(6.dp))
                     }
+                    if (hiddenDetected.isNotEmpty()) {
+                        TextButton(onClick = { showingHidden = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                            Text("${hiddenDetected.size} hidden")
+                        }
+                    }
                     TextButton(onClick = { addingRecurring = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("+ Add") }
                 }
                 Spacer(Modifier.height(12.dp))
                 if (recurring.isEmpty()) {
                     Text("No recurring transactions detected yet — add one with “+ Add”.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    recurring.take(12).forEach { s ->
+                    val shownRecurring = if (showAllRecurring) recurring else recurring.take(12)
+                    shownRecurring.forEach { s ->
                         val manualId = s.merchantKey.removePrefix("manual:").takeIf { s.merchantKey.startsWith("manual:") }
                         val label = if (manualId != null) s.label else overrides[s.merchantKey]?.label ?: s.label
                         Row(
@@ -277,6 +293,11 @@ internal fun DashboardScreen(
                                 }
                             }
                             Text(formatCents(s.typicalAmountCents), color = if (s.typicalAmountCents < 0) MoneyNegative else MoneyPositive, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    if (recurring.size > 12) {
+                        TextButton(onClick = { showAllRecurring = !showAllRecurring }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                            Text(if (showAllRecurring) "Show less" else "Show all ${recurring.size}")
                         }
                     }
                 }
@@ -415,6 +436,60 @@ internal fun DashboardScreen(
             onDismiss = { addingRecurring = false; editingManual = null },
         )
     }
+
+    if (showingHidden) {
+        HiddenRecurringDialog(
+            hidden = hiddenDetected,
+            categoryById = categoryById,
+            labelFor = { overrides[it.merchantKey]?.label ?: it.label },
+            onUnhide = { s ->
+                repo.setRecurringOverride(s.merchantKey, overrides[s.merchantKey]?.label, hidden = false)
+                recurVersion++
+            },
+            onDismiss = { showingHidden = false },
+        )
+    }
+}
+
+/** Lists the recurring series the user has hidden, each with an "Unhide" action to restore it. */
+@Composable
+private fun HiddenRecurringDialog(
+    hidden: List<RecurringSeries>,
+    categoryById: Map<String, Category>,
+    labelFor: (RecurringSeries) -> String,
+    onUnhide: (RecurringSeries) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Hidden recurring series") },
+        text = {
+            if (hidden.isEmpty()) {
+                Text("Nothing hidden.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Column(Modifier.width(400.dp).heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    hidden.forEach { s ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(labelFor(s), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Badge(s.cadence.name.lowercase())
+                                    s.categoryId?.let { categoryById[it] }?.let { Spacer(Modifier.width(6.dp)); CategoryChip(it) }
+                                }
+                            }
+                            Text(formatCents(s.typicalAmountCents), color = if (s.typicalAmountCents < 0) MoneyNegative else MoneyPositive, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = { onUnhide(s) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Unhide") }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }
 
 /** An existing counterparty offered as the basis for a manually-added recurring series (task #20). */

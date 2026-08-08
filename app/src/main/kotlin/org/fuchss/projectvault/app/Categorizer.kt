@@ -26,6 +26,9 @@ data class ClassifyResult(val committed: Int, val suggested: Int)
 private const val CAT_TRANSFERS = "cat-transfers"
 private const val CAT_INCOME = "cat-income"
 
+/** The salary seed category — used to base the "expected income" estimate on paychecks only. */
+internal const val CAT_SALARY = "cat-salary"
+
 /** The protected expense fallback (Sonstiges). It can never be disabled and is the reassign target. */
 internal const val CAT_OTHER = "cat-other"
 

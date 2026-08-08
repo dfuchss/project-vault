@@ -55,6 +55,8 @@ import org.fuchss.projectvault.data.db.ImportBatch
 import org.fuchss.projectvault.data.db.Profile
 import org.fuchss.projectvault.data.db.Txn
 import org.fuchss.projectvault.model.AccountType
+import java.time.LocalDate
+import java.time.YearMonth
 
 // ---------------------------------------------------------------- Account detail
 
@@ -86,6 +88,10 @@ internal fun AccountDetail(
     val selectedTxn = txns.firstOrNull { it.id == selectedTxnId }
     var search by remember(account.id) { mutableStateOf("") }
     var filter by remember(account.id) { mutableStateOf("ALL") } // ALL | NONE | REVIEW | <categoryId>
+    var period by remember(account.id) { mutableStateOf<YearMonth?>(null) } // null = all time
+    val txnMonths = remember(txns) {
+        txns.map { YearMonth.from(LocalDate.ofEpochDay(it.bookingDate)) }.distinct().sortedDescending()
+    }
 
     Column(Modifier.fillMaxSize()) {
         // header bar
@@ -143,7 +149,8 @@ internal fun AccountDetail(
                     DepotPane(account, repo, refreshKey)
                 } else {
                     val filtered = txns.filter { t ->
-                        (search.isBlank() || (t.counterparty ?: "").contains(search, true) || t.purpose.contains(search, true)) &&
+                        (period == null || YearMonth.from(LocalDate.ofEpochDay(t.bookingDate)) == period) &&
+                            (search.isBlank() || (t.counterparty ?: "").contains(search, true) || t.purpose.contains(search, true)) &&
                             when (filter) {
                                 "ALL" -> true
                                 // Uncategorized and To-review are disjoint: a txn with a pending
@@ -167,6 +174,9 @@ internal fun AccountDetail(
                         onFilter = { filter = it },
                         categories = categories,
                         categoryById = categoryById,
+                        months = txnMonths,
+                        period = period,
+                        onPeriod = { period = it },
                     )
                     Spacer(Modifier.height(8.dp))
                     if (txns.isEmpty()) EmptyHint("No transactions yet. Import a statement.")
@@ -266,6 +276,9 @@ private fun TransactionFilters(
     onFilter: (String) -> Unit,
     categories: List<Category>,
     categoryById: Map<String, Category>,
+    months: List<YearMonth>,
+    period: YearMonth?,
+    onPeriod: (YearMonth?) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SearchField(value = search, onValueChange = onSearch, modifier = Modifier.fillMaxWidth())
@@ -290,6 +303,24 @@ private fun TransactionFilters(
                             text = { Row(verticalAlignment = Alignment.CenterVertically) { Dot(parseHexColor(c.color)); Spacer(Modifier.width(6.dp)); Text(c.name) } },
                             onClick = { onFilter(c.id); menu = false },
                         )
+                    }
+                }
+            }
+
+            // A time filter (by month) — only meaningful once transactions span more than one month.
+            if (months.size > 1) {
+                var periodMenu by remember { mutableStateOf(false) }
+                Box {
+                    FilterPill(
+                        label = period?.let(::formatYearMonth) ?: "Any time",
+                        selected = period != null,
+                        trailingArrow = true,
+                    ) { periodMenu = true }
+                    RoundedDropdownMenu(expanded = periodMenu, onDismissRequest = { periodMenu = false }) {
+                        DropdownMenuItem(text = { Text("Any time") }, onClick = { onPeriod(null); periodMenu = false })
+                        months.forEach { m ->
+                            DropdownMenuItem(text = { Text(formatYearMonth(m)) }, onClick = { onPeriod(m); periodMenu = false })
+                        }
                     }
                 }
             }
