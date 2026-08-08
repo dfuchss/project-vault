@@ -70,7 +70,7 @@ internal fun StatCard(label: String, value: String, modifier: Modifier = Modifie
                     Spacer(Modifier.width(6.dp))
                     Surface(shape = RoundedCornerShape(4.dp), color = accent.copy(alpha = 0.16f)) {
                         Text(
-                            "≈ EST",
+                            LocalStrings.current.estTag,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = accent,
@@ -174,6 +174,7 @@ internal fun TrendChart(
     val bandColor = MaterialTheme.colorScheme.onSurfaceVariant
     val positive = MoneyPositive
     val negative = MoneyNegative
+    val strings = LocalStrings.current
     var hovered by remember { mutableStateOf<Int?>(null) }
 
     Canvas(
@@ -254,7 +255,7 @@ internal fun TrendChart(
         // range "min … max". Clamped to stay within the chart bounds.
         val bounds = band?.getOrNull(h)?.takeIf { it.second > it.first }
         val line1 = "${points[h].first} · ${formatCents(points[h].second)}"
-        val line2 = bounds?.let { "exp. ${formatCents(it.first)} … ${formatCents(it.second)}" }
+        val line2 = bounds?.let { strings.expectedRange(formatCents(it.first), formatCents(it.second)) }
         val style11 = TextStyle(fontSize = 11.sp)
         val l1 = measurer.measure(line1, style = style11)
         val l2 = line2?.let { measurer.measure(it, style = TextStyle(fontSize = 10.sp)) }

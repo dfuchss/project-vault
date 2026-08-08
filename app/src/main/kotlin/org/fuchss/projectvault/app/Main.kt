@@ -5,6 +5,7 @@ package org.fuchss.projectvault.app
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,11 @@ fun main() {
         var themeMode by remember {
             mutableStateOf(runCatching { ThemeMode.valueOf(prefs.getString(AppPrefs.THEME_MODE) ?: "SYSTEM") }.getOrDefault(ThemeMode.SYSTEM))
         }
+        var language by remember { mutableStateOf(AppLanguage.fromCode(prefs.getString(AppPrefs.LANGUAGE))) }
+        // Mirror the chosen language to the global holder so non-composable code (import summaries,
+        // date formatting) localizes too. Idempotent, safe to run on each recomposition.
+        val strings = stringsFor(language)
+        I18n.current = strings
         // Reopen the vault that was open at the last exit. It's cleared on an explicit "close vault",
         // so only a vault left open when the app quit is restored here.
         var vault by remember {
@@ -58,19 +64,23 @@ fun main() {
         fun closeVault() { vault?.close(); vault = null; prefs.clear(AppPrefs.LAST_VAULT_PATH) }
 
         Window(onCloseRequest = ::exitApplication, state = state, title = "Project Vault", icon = rememberClasspathPainter("branding/app-icon.png")) {
-            VaultTheme(themeMode) {
-                Surface(color = MaterialTheme.colorScheme.background) {
-                    val current = vault
-                    if (current == null) {
-                        VaultPicker(prefs = prefs, onOpened = { vault = it })
-                    } else {
-                        MainScreen(
-                            vault = current,
-                            prefs = prefs,
-                            themeMode = themeMode,
-                            onThemeChange = { themeMode = it; prefs.setString(AppPrefs.THEME_MODE, it.name) },
-                            onClose = ::closeVault,
-                        )
+            CompositionLocalProvider(LocalStrings provides strings) {
+                VaultTheme(themeMode) {
+                    Surface(color = MaterialTheme.colorScheme.background) {
+                        val current = vault
+                        if (current == null) {
+                            VaultPicker(prefs = prefs, onOpened = { vault = it })
+                        } else {
+                            MainScreen(
+                                vault = current,
+                                prefs = prefs,
+                                themeMode = themeMode,
+                                onThemeChange = { themeMode = it; prefs.setString(AppPrefs.THEME_MODE, it.name) },
+                                language = language,
+                                onLanguageChange = { language = it; prefs.setString(AppPrefs.LANGUAGE, it.code) },
+                                onClose = ::closeVault,
+                            )
+                        }
                     }
                 }
             }

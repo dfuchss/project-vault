@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -66,13 +67,14 @@ internal fun categoryAllowedForAmount(amountCents: Long, kind: CategoryKind): Bo
 
 @Composable
 internal fun SectionHeader(title: String, onAdd: () -> Unit, onManage: (() -> Unit)? = null) {
+    val strings = LocalStrings.current
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.weight(1f))
         if (onManage != null) {
-            TextButton(onClick = onManage, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Manage") }
+            TextButton(onClick = onManage, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text(strings.manage) }
         }
-        TextButton(onClick = onAdd, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("+ Add") }
+        TextButton(onClick = onAdd, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text(strings.addShort) }
     }
 }
 
@@ -122,6 +124,48 @@ internal fun ThemeToggle(mode: ThemeMode, onChange: (ThemeMode) -> Unit) {
             ThemeMode.LIGHT -> SunGlyph(color)
             ThemeMode.DARK -> MoonGlyph(color)
         }
+    }
+}
+
+/**
+ * A one-click language **toggle** cycling English ↔ German, showing the current language's two-letter
+ * code (EN/DE). Sits next to the theme toggle in the top bar.
+ */
+@Composable
+internal fun LanguageToggle(language: AppLanguage, onChange: (AppLanguage) -> Unit) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        onClick = { onChange(language.next()) },
+        shape = RoundedCornerShape(50),
+        color = Color.Transparent,
+        modifier = Modifier.height(34.dp),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            GlobeGlyph(color)
+            Text(language.label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = color)
+        }
+    }
+}
+
+/** A globe (outline + equator/latitudes + a meridian ellipse) — the "language" symbol for the switcher. */
+@Composable
+private fun GlobeGlyph(color: Color) {
+    Canvas(Modifier.size(18.dp)) {
+        val stroke = 1.5.dp.toPx()
+        val r = (size.minDimension - stroke) / 2f
+        val c = Offset(size.width / 2f, size.height / 2f)
+        drawCircle(color, radius = r, center = c, style = Stroke(stroke))
+        // Equator + two latitude lines.
+        drawLine(color, Offset(c.x - r, c.y), Offset(c.x + r, c.y), strokeWidth = stroke)
+        drawLine(color, Offset(c.x - r * 0.78f, c.y - r * 0.5f), Offset(c.x + r * 0.78f, c.y - r * 0.5f), strokeWidth = stroke * 0.8f)
+        drawLine(color, Offset(c.x - r * 0.78f, c.y + r * 0.5f), Offset(c.x + r * 0.78f, c.y + r * 0.5f), strokeWidth = stroke * 0.8f)
+        // Meridian ellipse + central axis (the "curved longitude" read of a globe).
+        drawOval(color, topLeft = Offset(c.x - r * 0.5f, c.y - r), size = Size(r, r * 2), style = Stroke(stroke))
+        drawLine(color, Offset(c.x, c.y - r), Offset(c.x, c.y + r), strokeWidth = stroke * 0.8f)
     }
 }
 

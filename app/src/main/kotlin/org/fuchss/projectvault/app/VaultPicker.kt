@@ -43,6 +43,7 @@ import java.io.File
 
 @Composable
 internal fun VaultPicker(prefs: AppPrefs, onOpened: (Vault) -> Unit) {
+    val strings = LocalStrings.current
     val recentStore = remember { RecentVaults.default() }
     var recents by remember { mutableStateOf(recentStore.list()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -52,7 +53,7 @@ internal fun VaultPicker(prefs: AppPrefs, onOpened: (Vault) -> Unit) {
             when {
                 file.exists() -> VaultManager.open(file)
                 allowCreate -> VaultManager.create(file)
-                else -> error("Vault not found: ${file.name}")
+                else -> error(strings.vaultNotFound(file.name))
             }
         }.onSuccess {
             recents = recentStore.add(file)
@@ -71,25 +72,25 @@ internal fun VaultPicker(prefs: AppPrefs, onOpened: (Vault) -> Unit) {
                 }
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "Local-first personal finance. Your data stays on your machine.",
+                    strings.vaultTagline,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(24.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(onClick = {
-                        val chosen = saveFileDialog("Create vault", "household.pvault") ?: return@Button
+                        val chosen = saveFileDialog(strings.createVault, "household.pvault") ?: return@Button
                         val file = if (chosen.name.endsWith(".pvault")) chosen else File(chosen.parentFile, chosen.name + ".pvault")
                         openVault(file, allowCreate = true)
-                    }, modifier = Modifier.weight(1f)) { Text("Create vault") }
+                    }, modifier = Modifier.weight(1f)) { Text(strings.createVault) }
                     OutlinedButton(onClick = {
-                        val file = openFileDialog("Open vault") ?: return@OutlinedButton
+                        val file = openFileDialog(strings.openVault) ?: return@OutlinedButton
                         openVault(file, allowCreate = false)
-                    }, modifier = Modifier.weight(1f)) { Text("Open…") }
+                    }, modifier = Modifier.weight(1f)) { Text(strings.openEllipsis) }
                 }
                 if (recents.isNotEmpty()) {
                     Spacer(Modifier.height(22.dp))
-                    Text("RECENT", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(strings.recent, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         recents.forEach { file ->
@@ -112,6 +113,7 @@ internal fun VaultPicker(prefs: AppPrefs, onOpened: (Vault) -> Unit) {
 
 @Composable
 private fun RecentRow(file: File, onOpen: () -> Unit, onForget: () -> Unit) {
+    val strings = LocalStrings.current
     val exists = file.exists()
     Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -135,10 +137,10 @@ private fun RecentRow(file: File, onOpen: () -> Unit, onForget: () -> Unit) {
                 )
             }
             if (!exists) {
-                Text("missing", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                Text(strings.missing, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.width(6.dp))
             }
-            TextButton(onClick = onForget, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Forget") }
+            TextButton(onClick = onForget, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text(strings.forget) }
         }
     }
 }

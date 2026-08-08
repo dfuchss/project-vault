@@ -61,6 +61,7 @@ internal fun DashboardScreen(
     balances: Map<String, Long?>,
     refreshKey: Int,
 ) {
+    val strings = LocalStrings.current
     val analyticsTxns = remember(accounts, refreshKey) {
         accounts.flatMap { repo.transactions(it.id) }.map { t ->
             AnalyticsTxn(t.amountCents, LocalDate.ofEpochDay(t.bookingDate), t.categoryId, t.categoryId?.let { categoryById[it]?.kind }, t.counterparty)
@@ -123,7 +124,7 @@ internal fun DashboardScreen(
         val m = selectedMonth
         if (m == null) analyticsTxns else analyticsTxns.filter { YearMonth.from(it.date) == m }
     }
-    val periodLabel = selectedMonth?.let(::formatYearMonth) ?: "All time"
+    val periodLabel = selectedMonth?.let(::formatYearMonth) ?: strings.allTime
 
     val netWorth = accounts.sumOf { balances[it.id] ?: 0L }
     val incomeExpense = remember(periodTxns) { Analytics.incomeExpense(periodTxns) }
@@ -147,13 +148,13 @@ internal fun DashboardScreen(
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Overview", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(strings.overview, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             if (months.isNotEmpty()) {
                 var menu by remember { mutableStateOf(false) }
                 Box {
                     OutlinedButton(onClick = { menu = true }) { Text(periodLabel) }
                     RoundedDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("All time") }, onClick = { selectedMonth = null; menu = false })
+                        DropdownMenuItem(text = { Text(strings.allTime) }, onClick = { selectedMonth = null; menu = false })
                         months.forEach { m ->
                             DropdownMenuItem(text = { Text(formatYearMonth(m)) }, onClick = { selectedMonth = m; menu = false })
                         }
@@ -164,19 +165,21 @@ internal fun DashboardScreen(
         Spacer(Modifier.height(16.dp))
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatCard("Net worth", formatCents(netWorth), Modifier.weight(1f))
-            StatCard(if (isExpectedIncome) "Expected income" else "Income", formatCents(displayedIncome), Modifier.weight(1f), MoneyPositive, estimated = isExpectedIncome)
-            StatCard("Expense", formatCents(incomeExpense.expenseCents), Modifier.weight(1f), MoneyNegative)
-            StatCard("Net", formatCents(incomeExpense.netCents), Modifier.weight(1f))
+            StatCard(strings.netWorth, formatCents(netWorth), Modifier.weight(1f))
+            // Keep the short "Income" label even when estimated — the "≈ EST" marker conveys the estimate,
+            // so a long "Expected income" label never widens the card.
+            StatCard(strings.income, formatCents(displayedIncome), Modifier.weight(1f), MoneyPositive, estimated = isExpectedIncome)
+            StatCard(strings.expense, formatCents(incomeExpense.expenseCents), Modifier.weight(1f), MoneyNegative)
+            StatCard(strings.net, formatCents(incomeExpense.netCents), Modifier.weight(1f))
         }
 
         Spacer(Modifier.height(16.dp))
         Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(20.dp)) {
-                Text("Spending by category · $periodLabel", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(strings.spendingByCategory(periodLabel), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
                 if (byCategory.isEmpty()) {
-                    Text("No spending yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(strings.noSpendingYet, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     val totalSpending = byCategory.sumOf { it.amountCents }
                     val max = byCategory.first().amountCents.coerceAtLeast(1)
@@ -189,7 +192,7 @@ internal fun DashboardScreen(
                                 modifier = Modifier.fillMaxSize(),
                             )
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Total", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(strings.total, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(formatCents(totalSpending), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             }
                         }
@@ -198,7 +201,7 @@ internal fun DashboardScreen(
                             shown.forEach { total ->
                                 val category = total.categoryId?.let { categoryById[it] }
                                 CategoryBar(
-                                    name = category?.name ?: "Uncategorized",
+                                    name = category?.name ?: strings.uncategorized,
                                     color = parseHexColor(category?.color),
                                     amount = total.amountCents,
                                     fraction = total.amountCents.toFloat() / max,
@@ -213,14 +216,14 @@ internal fun DashboardScreen(
         Spacer(Modifier.height(16.dp))
         Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(20.dp)) {
-                Text("Monthly cash flow", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(strings.monthlyCashFlow, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
                 if (monthly.isEmpty()) {
-                    Text("No transactions yet. Import a statement.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(strings.noTransactionsYetImport, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     val window = monthly.takeLast(12)
                     if (window.size >= 2) {
-                        Text("Net trend", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(strings.netTrend, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(4.dp))
                         TrendChart(
                             points = window.map { "%02d/%d".format(it.month, it.year) to it.netCents },
@@ -256,21 +259,21 @@ internal fun DashboardScreen(
         Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Recurring", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text(strings.recurring, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     if (recurring.isNotEmpty()) {
-                        Text("tap to edit", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(strings.tapToEdit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(6.dp))
                     }
                     if (hiddenDetected.isNotEmpty()) {
                         TextButton(onClick = { showingHidden = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
-                            Text("${hiddenDetected.size} hidden")
+                            Text(strings.hiddenCount(hiddenDetected.size))
                         }
                     }
-                    TextButton(onClick = { addingRecurring = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("+ Add") }
+                    TextButton(onClick = { addingRecurring = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text(strings.addShort) }
                 }
                 Spacer(Modifier.height(12.dp))
                 if (recurring.isEmpty()) {
-                    Text("No recurring transactions detected yet — add one with “+ Add”.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(strings.noRecurringYet, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     val shownRecurring = if (showAllRecurring) recurring else recurring.take(12)
                     shownRecurring.forEach { s ->
@@ -285,11 +288,11 @@ internal fun DashboardScreen(
                             Column(Modifier.weight(1f)) {
                                 Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Badge(s.cadence.name.lowercase())
-                                    if (manualId != null) { Spacer(Modifier.width(6.dp)); Badge("manual") }
+                                    Badge(strings.cadenceLabel(s.cadence))
+                                    if (manualId != null) { Spacer(Modifier.width(6.dp)); Badge(strings.manualBadge) }
                                     s.categoryId?.let { categoryById[it] }?.let { Spacer(Modifier.width(6.dp)); CategoryChip(it) }
                                     Spacer(Modifier.width(6.dp))
-                                    Text("next ${formatLocalDate(s.nextExpectedDate)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(strings.nextOccurrence(formatLocalDate(s.nextExpectedDate)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                             Text(formatCents(s.typicalAmountCents), color = if (s.typicalAmountCents < 0) MoneyNegative else MoneyPositive, fontWeight = FontWeight.Medium)
@@ -297,7 +300,7 @@ internal fun DashboardScreen(
                     }
                     if (recurring.size > 12) {
                         TextButton(onClick = { showAllRecurring = !showAllRecurring }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
-                            Text(if (showAllRecurring) "Show less" else "Show all ${recurring.size}")
+                            Text(if (showAllRecurring) strings.showLess else strings.showAll(recurring.size))
                         }
                     }
                 }
@@ -307,29 +310,29 @@ internal fun DashboardScreen(
         Spacer(Modifier.height(16.dp))
         Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(20.dp)) {
-                Text("Forecast · next 6 months", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(strings.forecastTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Fixed income ${formatCents(fixed.incomeCents)} · fixed costs ${formatCents(fixed.expenseCents)} · free ${formatCents(fixed.netCents)} / month",
+                    strings.fixedSummary(formatCents(fixed.incomeCents), formatCents(fixed.expenseCents), formatCents(fixed.netCents)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (variable.sampleMonths > 0) {
                     Text(
-                        "Variable spending ø ${formatCents(variable.meanCents)} ± ${formatCents(variable.stdDevCents)} / month (last ${variable.sampleMonths} mo)",
+                        strings.variableSummary(formatCents(variable.meanCents), formatCents(variable.stdDevCents), variable.sampleMonths),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Spacer(Modifier.height(12.dp))
                 if (forecast.all { it.incomeCents == 0L && it.expenseCents == 0L } && variable.sampleMonths == 0) {
-                    Text("Not enough recurring data to forecast yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(strings.notEnoughForecast, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     // Roll today's net worth forward by each month's projected net MINUS the estimated
                     // variable spend, so the central line reflects likely reality (not just fixed items).
                     // The band is ±1σ of cumulative variable spend: independent months, so variance adds
                     // and the half-width grows with √k — a widening "cone of uncertainty".
-                    val labels = listOf("now") + forecast.map { "%02d/%d".format(it.month, it.year) }
+                    val labels = listOf(strings.nowLabel) + forecast.map { "%02d/%d".format(it.month, it.year) }
                     val central = ArrayList<Long>(labels.size)
                     val band = ArrayList<Pair<Long, Long>>(labels.size) // (lower, upper) per point
                     var running = netWorth
@@ -344,7 +347,7 @@ internal fun DashboardScreen(
                     val delta = endBalance - netWorth
                     val endLow = band.last().first
                     val endHigh = band.last().second
-                    Text("Projected balance (± 1σ variable spend)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(strings.projectedBalanceLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(4.dp))
                     TrendChart(
                         points = projected,
@@ -355,14 +358,14 @@ internal fun DashboardScreen(
                     Spacer(Modifier.height(10.dp))
                     val sign = if (delta >= 0) "+" else ""
                     Text(
-                        "≈ ${formatCents(endBalance)} by ${labels.last()} · $sign${formatCents(delta)} over 6 months",
+                        strings.projectedApprox(formatCents(endBalance), labels.last(), "$sign${formatCents(delta)}"),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (delta < 0) MoneyNegative else MoneyPositive,
                         fontWeight = FontWeight.Medium,
                     )
                     if (endHigh != endLow) {
                         Text(
-                            "range ${formatCents(endLow)} … ${formatCents(endHigh)}",
+                            strings.projectedRange(formatCents(endLow), formatCents(endHigh)),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -370,7 +373,7 @@ internal fun DashboardScreen(
                     if (band.any { it.first < 0 }) {
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "⚠ Could go negative within the range — possible cash shortfall.",
+                            strings.shortfallWarning,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
                         )
@@ -387,35 +390,35 @@ internal fun DashboardScreen(
         var name by remember(editing) { mutableStateOf(existing?.label ?: editing.label) }
         AlertDialog(
             onDismissRequest = { editingRecurring = null },
-            title = { Text("Recurring series") },
+            title = { Text(strings.recurringSeriesTitle) },
             text = {
                 Column {
                     Text(
-                        "Detected as \"${editing.label}\" · ${editing.cadence.name.lowercase()} · ${formatCents(editing.typicalAmountCents)}",
+                        strings.detectedAs(editing.label, strings.cadenceLabel(editing.cadence), formatCents(editing.typicalAmountCents)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(10.dp))
-                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.name) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(8.dp))
                     TextButton(
                         onClick = { repo.setRecurringOverride(editing.merchantKey, existing?.label, hidden = true); recurVersion++; editingRecurring = null },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    ) { Text("Hide from recurring", color = MaterialTheme.colorScheme.error) }
+                    ) { Text(strings.hideFromRecurring, color = MaterialTheme.colorScheme.error) }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     repo.setRecurringOverride(editing.merchantKey, name.trim().ifBlank { null }, hidden = false)
                     recurVersion++; editingRecurring = null
-                }) { Text("Save") }
+                }) { Text(strings.save) }
             },
             dismissButton = {
                 Row {
                     if (existing != null) {
-                        TextButton(onClick = { repo.clearRecurringOverride(editing.merchantKey); recurVersion++; editingRecurring = null }) { Text("Reset") }
+                        TextButton(onClick = { repo.clearRecurringOverride(editing.merchantKey); recurVersion++; editingRecurring = null }) { Text(strings.reset) }
                     }
-                    TextButton(onClick = { editingRecurring = null }) { Text("Cancel") }
+                    TextButton(onClick = { editingRecurring = null }) { Text(strings.cancel) }
                 }
             },
         )
@@ -460,12 +463,13 @@ private fun HiddenRecurringDialog(
     onUnhide: (RecurringSeries) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Hidden recurring series") },
+        title = { Text(strings.hiddenRecurringTitle) },
         text = {
             if (hidden.isEmpty()) {
-                Text("Nothing hidden.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(strings.nothingHidden, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 Column(Modifier.width(400.dp).heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     hidden.forEach { s ->
@@ -476,19 +480,19 @@ private fun HiddenRecurringDialog(
                             Column(Modifier.weight(1f)) {
                                 Text(labelFor(s), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Badge(s.cadence.name.lowercase())
+                                    Badge(strings.cadenceLabel(s.cadence))
                                     s.categoryId?.let { categoryById[it] }?.let { Spacer(Modifier.width(6.dp)); CategoryChip(it) }
                                 }
                             }
                             Text(formatCents(s.typicalAmountCents), color = if (s.typicalAmountCents < 0) MoneyNegative else MoneyPositive, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.width(8.dp))
-                            TextButton(onClick = { onUnhide(s) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Unhide") }
+                            TextButton(onClick = { onUnhide(s) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text(strings.unhide) }
                         }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(strings.done) } },
     )
 }
 
@@ -517,6 +521,7 @@ private fun RecurringSeriesDialog(
     onDelete: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     val editing = existing != null
     var selected by remember { mutableStateOf<RecurringCandidate?>(null) }
 
@@ -528,13 +533,13 @@ private fun RecurringSeriesDialog(
         }
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("Add recurring · pick a transaction") },
+            title = { Text(strings.addRecurringPickTitle) },
             text = {
                 Column(Modifier.width(400.dp)) {
-                    OutlinedTextField(query, { query = it }, label = { Text("Search counterparty") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(query, { query = it }, label = { Text(strings.searchCounterparty) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(8.dp))
                     if (filtered.isEmpty()) {
-                        Text("No matching transactions to base a series on.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(strings.noMatchingTransactions, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             filtered.forEach { c ->
@@ -544,7 +549,7 @@ private fun RecurringSeriesDialog(
                                 ) {
                                     Column(Modifier.weight(1f)) {
                                         Text(c.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("${c.count}× · last ${formatLocalDate(c.lastDate)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(strings.candidateSubtitle(c.count, formatLocalDate(c.lastDate)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     Text(formatCents(c.amountCents), color = if (c.amountCents < 0) MoneyNegative else MoneyPositive, fontWeight = FontWeight.Medium)
                                 }
@@ -554,7 +559,7 @@ private fun RecurringSeriesDialog(
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
         )
         return
     }
@@ -578,36 +583,36 @@ private fun RecurringSeriesDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (editing) "Edit recurring series" else "Add recurring series") },
+        title = { Text(if (editing) strings.editRecurringSeriesTitle else strings.addRecurringSeriesTitle) },
         text = {
             Column(Modifier.width(360.dp)) {
-                Text("Amount (from the selected transaction)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(strings.amountFromTransaction, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(formatCents(amountCents), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = if (amountCents < 0) MoneyNegative else MoneyPositive)
                 Spacer(Modifier.height(10.dp))
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.name) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Box {
-                        OutlinedButton(onClick = { cadenceMenu = true }) { Text(cadence.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                        OutlinedButton(onClick = { cadenceMenu = true }) { Text(strings.cadenceLabel(cadence)) }
                         RoundedDropdownMenu(expanded = cadenceMenu, onDismissRequest = { cadenceMenu = false }) {
                             Cadence.entries.forEach { c ->
-                                DropdownMenuItem(text = { Text(c.name.lowercase().replaceFirstChar { it.uppercase() }) }, onClick = { cadence = c; cadenceMenu = false })
+                                DropdownMenuItem(text = { Text(strings.cadenceLabel(c)) }, onClick = { cadence = c; cadenceMenu = false })
                             }
                         }
                     }
                     OutlinedTextField(
                         value = dateText, onValueChange = { dateText = it },
-                        label = { Text("Next date (YYYY-MM-DD)") }, singleLine = true, modifier = Modifier.weight(1f),
+                        label = { Text(strings.nextDateLabel) }, singleLine = true, modifier = Modifier.weight(1f),
                         isError = dateText.isNotBlank() && nextDate == null,
                     )
                 }
                 Spacer(Modifier.height(10.dp))
                 Box {
                     OutlinedButton(onClick = { categoryMenu = true }) {
-                        Text("Category: " + (allowedCats.firstOrNull { it.id == categoryId }?.name ?: "None"))
+                        Text(strings.categoryButton(allowedCats.firstOrNull { it.id == categoryId }?.name ?: strings.none))
                     }
                     RoundedDropdownMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
-                        DropdownMenuItem(text = { Text("None") }, onClick = { categoryId = null; categoryMenu = false })
+                        DropdownMenuItem(text = { Text(strings.none) }, onClick = { categoryId = null; categoryMenu = false })
                         allowedCats.forEach { c ->
                             DropdownMenuItem(text = { Text(c.name) }, onClick = { categoryId = c.id; categoryMenu = false })
                         }
@@ -616,13 +621,13 @@ private fun RecurringSeriesDialog(
             }
         },
         confirmButton = {
-            TextButton(enabled = valid, onClick = { onSave(name.trim(), categoryId, cadence.name, amountCents, nextDate!!) }) { Text("Save") }
+            TextButton(enabled = valid, onClick = { onSave(name.trim(), categoryId, cadence.name, amountCents, nextDate!!) }) { Text(strings.save) }
         },
         dismissButton = {
             Row {
-                if (onDelete != null) TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-                if (!editing) TextButton(onClick = { selected = null }) { Text("Back") }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                if (onDelete != null) TextButton(onClick = onDelete) { Text(strings.delete, color = MaterialTheme.colorScheme.error) }
+                if (!editing) TextButton(onClick = { selected = null }) { Text(strings.back) }
+                TextButton(onClick = onDismiss) { Text(strings.cancel) }
             }
         },
     )

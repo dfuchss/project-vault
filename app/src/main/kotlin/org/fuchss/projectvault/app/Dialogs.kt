@@ -52,16 +52,17 @@ import org.fuchss.projectvault.model.CategoryKind
 
 @Composable
 internal fun AddProfileDialog(onDismiss: () -> Unit, onAdd: (String, String) -> Unit) {
+    val strings = LocalStrings.current
     var name by remember { mutableStateOf("") }
     var color by remember { mutableStateOf(ProfilePalette.first()) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add profile") },
+        title = { Text(strings.addProfileTitle) },
         text = {
             Column {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true)
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.name) }, singleLine = true)
                 Spacer(Modifier.height(14.dp))
-                Text("Colour", style = MaterialTheme.typography.labelMedium)
+                Text(strings.colour, style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.height(6.dp))
                 FlowRowChips {
                     ProfilePalette.forEach { hex ->
@@ -75,8 +76,8 @@ internal fun AddProfileDialog(onDismiss: () -> Unit, onAdd: (String, String) -> 
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { if (name.isNotBlank()) onAdd(name.trim(), color) }) { Text("Add") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = { if (name.isNotBlank()) onAdd(name.trim(), color) }) { Text(strings.add) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )
 }
 
@@ -89,13 +90,14 @@ internal fun ManageProfilesDialog(
     onDelete: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     var confirmDelete by remember { mutableStateOf<Profile?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Manage profiles") },
+        title = { Text(strings.manageProfilesTitle) },
         text = {
             if (profiles.isEmpty()) {
-                Text("No profiles.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(strings.noProfilesShort, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 Column(Modifier.width(360.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     profiles.forEach { profile ->
@@ -109,34 +111,31 @@ internal fun ManageProfilesDialog(
                                 modifier = Modifier.weight(1f),
                                 trailingIcon = {
                                     if (name.trim().isNotBlank() && name.trim() != profile.name) {
-                                        TextButton(onClick = { onRename(profile.id, name.trim()) }) { Text("Save") }
+                                        TextButton(onClick = { onRename(profile.id, name.trim()) }) { Text(strings.save) }
                                     }
                                 },
                             )
                             TextButton(onClick = { confirmDelete = profile }) {
-                                Text("Delete", color = MaterialTheme.colorScheme.error)
+                                Text(strings.delete, color = MaterialTheme.colorScheme.error)
                             }
                         }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(strings.done) } },
     )
     val deleting = confirmDelete
     if (deleting != null) {
         val n = accountCountFor(deleting)
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
-            title = { Text("Delete profile “${deleting.name}”?") },
+            title = { Text(strings.deleteProfileTitle(deleting.name)) },
             text = {
-                Text(
-                    if (n == 0) "This profile owns no accounts. It will be removed."
-                    else "It will be removed as an owner from $n account(s); those accounts and their data stay.",
-                )
+                Text(if (n == 0) strings.deleteProfileNoAccounts else strings.deleteProfileBody(n))
             },
-            confirmButton = { TextButton(onClick = { onDelete(deleting.id); confirmDelete = null }) { Text("Delete") } },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { onDelete(deleting.id); confirmDelete = null }) { Text(strings.delete) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text(strings.cancel) } },
         )
     }
 }
@@ -151,20 +150,21 @@ internal fun EditOwnersDialog(
     onSave: (List<String>) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     val selected = remember { mutableStateListOf<String>().apply { addAll(currentOwnerIds) } }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Owners of “$accountName”") },
+        title = { Text(strings.ownersOfTitle(accountName)) },
         text = {
             if (profiles.isEmpty()) {
                 Column {
-                    Text("No profiles yet — add one first, then assign it here.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(strings.noProfilesAddFirst, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(10.dp))
-                    Button(onClick = onAddProfile) { Text("+ Add profile") }
+                    Button(onClick = onAddProfile) { Text(strings.addProfileAction) }
                 }
             } else {
                 Column(Modifier.width(320.dp)) {
-                    Text("Tick everyone who owns this account (joint = several).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(strings.tickOwners, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
                     profiles.forEach { profile ->
                         Row(
@@ -183,9 +183,9 @@ internal fun EditOwnersDialog(
             }
         },
         confirmButton = {
-            if (profiles.isNotEmpty()) TextButton(onClick = { onSave(selected.toList()) }) { Text("Save") }
+            if (profiles.isNotEmpty()) TextButton(onClick = { onSave(selected.toList()) }) { Text(strings.save) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )
 }
 
@@ -205,18 +205,19 @@ internal fun AddCategoryDialog(
     var color by remember { mutableStateOf(ProfilePalette.first()) }
     var keywords by remember { mutableStateOf("") }
     var kindMenu by remember { mutableStateOf(false) }
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New category") },
+        title = { Text(strings.newCategoryTitle) },
         text = {
             Column(Modifier.width(360.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.name) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
                 Box {
-                    OutlinedButton(onClick = { kindMenu = true }, enabled = allowedKinds.size > 1) { Text("Kind: ${kind.name}") }
+                    OutlinedButton(onClick = { kindMenu = true }, enabled = allowedKinds.size > 1) { Text(strings.kindButton(strings.kindLabel(kind))) }
                     RoundedDropdownMenu(expanded = kindMenu, onDismissRequest = { kindMenu = false }) {
                         allowedKinds.forEach { k ->
-                            DropdownMenuItem(text = { Text(k.name) }, onClick = { kind = k; kindMenu = false })
+                            DropdownMenuItem(text = { Text(strings.kindLabel(k)) }, onClick = { kind = k; kindMenu = false })
                         }
                     }
                 }
@@ -224,12 +225,12 @@ internal fun AddCategoryDialog(
                 OutlinedTextField(
                     value = keywords,
                     onValueChange = { keywords = it },
-                    label = { Text("Keywords (optional)") },
-                    supportingText = { Text("Comma-separated. Transactions containing one auto-match this category.") },
+                    label = { Text(strings.keywordsOptional) },
+                    supportingText = { Text(strings.keywordsAddHelp) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(12.dp))
-                Text("Colour", style = MaterialTheme.typography.labelMedium)
+                Text(strings.colour, style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.height(6.dp))
                 FlowRowChips {
                     ProfilePalette.forEach { hex ->
@@ -248,9 +249,9 @@ internal fun AddCategoryDialog(
                     val kw = keywords.split(',', '\n').map { it.trim() }.filter { it.length >= 2 }
                     onAdd(name.trim(), kind, color, kw)
                 }
-            }) { Text("Add") }
+            }) { Text(strings.add) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )
 }
 
@@ -268,22 +269,23 @@ internal fun EditCategoryDialog(
     var name by remember { mutableStateOf(category.name) }
     var color by remember { mutableStateOf(category.color ?: ProfilePalette.first()) }
     var keywords by remember { mutableStateOf(initialKeywords.joinToString(", ")) }
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit category") },
+        title = { Text(strings.editCategoryTitle) },
         text = {
             Column(Modifier.width(360.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.name) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = keywords,
                     onValueChange = { keywords = it },
-                    label = { Text("Keywords") },
-                    supportingText = { Text("Comma-separated. Replaces this category's current keywords.") },
+                    label = { Text(strings.keywords) },
+                    supportingText = { Text(strings.keywordsEditHelp) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(12.dp))
-                Text("Colour", style = MaterialTheme.typography.labelMedium)
+                Text(strings.colour, style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.height(6.dp))
                 FlowRowChips {
                     ProfilePalette.forEach { hex ->
@@ -302,9 +304,9 @@ internal fun EditCategoryDialog(
                     val kw = keywords.split(',', '\n').map { it.trim() }.filter { it.length >= 2 }.distinct()
                     onSave(name.trim(), color, kw)
                 }
-            }) { Text("Save") }
+            }) { Text(strings.save) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )
 }
 
@@ -329,11 +331,12 @@ internal fun ManageCategoriesDialog(
     onEnable: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     var confirmDelete by remember { mutableStateOf<Category?>(null) }
     var confirmDisable by remember { mutableStateOf<Category?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Manage categories") },
+        title = { Text(strings.manageCategoriesTitle) },
         text = {
             CategoryManagerList(
                 categories = categories,
@@ -344,16 +347,16 @@ internal fun ManageCategoriesDialog(
                 onDelete = { c -> confirmDelete = c },
             )
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(strings.done) } },
     )
     val deleting = confirmDelete
     if (deleting != null) {
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
-            title = { Text("Delete category “${deleting.name}”?") },
-            text = { Text("Transactions in this category become uncategorized and its learned rules are removed. This can't be undone.") },
-            confirmButton = { TextButton(onClick = { onDelete(deleting.id); confirmDelete = null }) { Text("Delete") } },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
+            title = { Text(strings.deleteCategoryTitle(deleting.name)) },
+            text = { Text(strings.deleteCategoryBody) },
+            confirmButton = { TextButton(onClick = { onDelete(deleting.id); confirmDelete = null }) { Text(strings.delete) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text(strings.cancel) } },
         )
     }
     val disabling = confirmDisable
@@ -361,10 +364,10 @@ internal fun ManageCategoriesDialog(
         val count = txnCountFor(disabling.id)
         AlertDialog(
             onDismissRequest = { confirmDisable = null },
-            title = { Text("Disable “${disabling.name}”?") },
-            text = { Text("$count transaction${if (count == 1) "" else "s"} in this category will be reassigned to Sonstiges, and it will be hidden from the pickers and suggestions. You can re-enable it later.") },
-            confirmButton = { TextButton(onClick = { onDisable(disabling.id); confirmDisable = null }) { Text("Disable") } },
-            dismissButton = { TextButton(onClick = { confirmDisable = null }) { Text("Cancel") } },
+            title = { Text(strings.disableCategoryTitle(disabling.name)) },
+            text = { Text(strings.disableCategoryBody(count)) },
+            confirmButton = { TextButton(onClick = { onDisable(disabling.id); confirmDisable = null }) { Text(strings.disable) } },
+            dismissButton = { TextButton(onClick = { confirmDisable = null }) { Text(strings.cancel) } },
         )
     }
 }
@@ -383,11 +386,12 @@ internal fun CategoryManagerList(
     onEdit: (Category) -> Unit,
     onDelete: (Category) -> Unit,
 ) {
+    val strings = LocalStrings.current
     Column(Modifier.width(460.dp).heightIn(max = 560.dp)) {
-        Button(onClick = onAddCategory, modifier = Modifier.fillMaxWidth()) { Text("＋  New category") }
+        Button(onClick = onAddCategory, modifier = Modifier.fillMaxWidth()) { Text(strings.newCategoryButton) }
         Spacer(Modifier.height(12.dp))
         Text(
-            "Add categories with optional keywords, or disable expense categories you don't use — disabled ones are hidden from the pickers and suggestions, and their transactions move to Sonstiges. You can re-enable them anytime.",
+            strings.categoryManagerHelp,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -399,7 +403,7 @@ internal fun CategoryManagerList(
                 val group = categories.filter { it.kind == kind }
                     .sortedWith(compareByDescending<Category> { it.enabled }.thenBy { it.name.lowercase() })
                 if (group.isNotEmpty()) {
-                    CategorySectionHeader(kindLabel(kind), group.size)
+                    CategorySectionHeader(strings.kindLabel(kind), group.size)
                     group.forEach { c ->
                         ManagedCategoryRow(
                             category = c,
@@ -414,12 +418,6 @@ internal fun CategoryManagerList(
             }
         }
     }
-}
-
-private fun kindLabel(kind: CategoryKind): String = when (kind) {
-    CategoryKind.INCOME -> "Income"
-    CategoryKind.EXPENSE -> "Expenses"
-    CategoryKind.TRANSFER -> "Transfers"
 }
 
 @Composable
@@ -440,6 +438,7 @@ private fun ManagedCategoryRow(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     // Only expense categories can be disabled, and Sonstiges (the reassign target) never.
     val canToggle = category.kind == CategoryKind.EXPENSE && category.id != CAT_OTHER
     val disabled = category.enabled == 0L
@@ -468,22 +467,22 @@ private fun ManagedCategoryRow(
                 overflow = TextOverflow.Ellipsis,
             )
             when {
-                disabled -> StatusPill("Disabled")
-                !canToggle && !isUser -> StatusPill("Built-in")
+                disabled -> StatusPill(strings.statusDisabled)
+                !canToggle && !isUser -> StatusPill(strings.statusBuiltIn)
             }
             if (canToggle) {
                 if (disabled) {
-                    TextButton(onClick = onEnable, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) { Text("Enable") }
+                    TextButton(onClick = onEnable, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) { Text(strings.enable) }
                 } else {
                     TextButton(onClick = onDisable, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) {
-                        Text("Disable", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(strings.disable, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
             if (isUser) {
-                TextButton(onClick = onEdit, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) { Text("Edit") }
+                TextButton(onClick = onEdit, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) { Text(strings.edit) }
                 TextButton(onClick = onDelete, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text(strings.delete, color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -515,20 +514,21 @@ internal fun AddAccountDialog(
     var iban by remember { mutableStateOf("") }
     var typeMenu by remember { mutableStateOf(false) }
     val ownerIds = remember { mutableStateListOf<String>() }
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add account") },
+        title = { Text(strings.addAccountTitle) },
         text = {
             Column {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.name) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
                 Box {
-                    OutlinedButton(onClick = { typeMenu = true }) { Text("Type: ${accountTypeLabel(type)}") }
+                    OutlinedButton(onClick = { typeMenu = true }) { Text(strings.typeButton(accountTypeLabel(type))) }
                     RoundedDropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
                         AccountType.entries.forEach { t ->
                             DropdownMenuItem(
                                 text = {
-                                    Text(accountTypeLabel(t) + if (ImportSupport.isSupported(t)) "" else "  ·  no import")
+                                    Text(accountTypeLabel(t) + if (ImportSupport.isSupported(t)) "" else strings.noImportSuffix)
                                 },
                                 onClick = {
                                     // Pre-fill the bank when the field is empty or still the previous type's default.
@@ -542,14 +542,14 @@ internal fun AddAccountDialog(
                     }
                 }
                 Spacer(Modifier.height(4.dp))
-                Text(ImportSupport.hint(type), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(strings.importHint(type), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(10.dp))
-                OutlinedTextField(value = institution, onValueChange = { institution = it }, label = { Text("Bank (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = institution, onValueChange = { institution = it }, label = { Text(strings.bankOptional) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
-                OutlinedTextField(value = iban, onValueChange = { iban = it }, label = { Text("IBAN (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = iban, onValueChange = { iban = it }, label = { Text(strings.ibanOptional) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (profiles.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
-                    Text("Owners (joint = several)", style = MaterialTheme.typography.labelMedium)
+                    Text(strings.ownersJoint, style = MaterialTheme.typography.labelMedium)
                     profiles.forEach { profile ->
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable {
                             if (ownerIds.contains(profile.id)) ownerIds.remove(profile.id) else ownerIds.add(profile.id)
@@ -563,22 +563,23 @@ internal fun AddAccountDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { if (name.isNotBlank()) onAdd(name.trim(), type, institution, iban, ownerIds.toList()) }) { Text("Add") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = { if (name.isNotBlank()) onAdd(name.trim(), type, institution, iban, ownerIds.toList()) }) { Text(strings.add) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )
 }
 
 @Composable
 internal fun ImportReviewDialog(previews: List<ImportPreview>, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    val strings = LocalStrings.current
     val multi = previews.size > 1
     val totalItems = previews.sumOf { it.rowCount }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (multi) "Review import · ${previews.size} files" else "Review import") },
+        title = { Text(if (multi) strings.reviewImportMultiTitle(previews.size) else strings.reviewImportTitle) },
         text = {
             Column {
                 if (multi) {
-                    Text("$totalItems items across ${previews.size} files", style = MaterialTheme.typography.bodyLarge)
+                    Text(strings.itemsAcrossFiles(totalItems, previews.size), style = MaterialTheme.typography.bodyLarge)
                     Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(4.dp))
                 }
                 LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -592,9 +593,9 @@ internal fun ImportReviewDialog(previews: List<ImportPreview>, onDismiss: () -> 
                                 }
                                 if (!preview.ok) {
                                     if (preview.verifiable) {
-                                        Text("Does not reconcile (may be incomplete/redacted) — you can still import.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                                        Text(strings.doesNotReconcileImportable, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                                     } else {
-                                        Text("Balance not verifiable from this export (no opening balance) — safe to import.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                        Text(strings.balanceNotVerifiable, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                                 Spacer(Modifier.height(4.dp))
@@ -619,7 +620,7 @@ internal fun ImportReviewDialog(previews: List<ImportPreview>, onDismiss: () -> 
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(if (multi) "Import all" else "Import") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(if (multi) strings.importAll else strings.importAction) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )
 }

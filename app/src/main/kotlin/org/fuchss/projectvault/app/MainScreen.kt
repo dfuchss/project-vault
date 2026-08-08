@@ -73,8 +73,11 @@ internal fun MainScreen(
     prefs: AppPrefs = AppPrefs.default(),
     themeMode: ThemeMode = ThemeMode.SYSTEM,
     onThemeChange: (ThemeMode) -> Unit = {},
+    language: AppLanguage = AppLanguage.EN,
+    onLanguageChange: (AppLanguage) -> Unit = {},
     onClose: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     val repo = remember(vault) { VaultRepository(vault) }
     val importService = remember(repo) { ImportService(repo) }
     val categorizer = remember(repo) { Categorizer(repo, DjlEmbedder()) }
@@ -127,6 +130,8 @@ internal fun MainScreen(
             Spacer(Modifier.width(12.dp))
             Text(vault.path.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
+            LanguageToggle(language, onLanguageChange)
+            Spacer(Modifier.width(4.dp))
             ThemeToggle(themeMode, onThemeChange)
             Spacer(Modifier.width(4.dp))
             IconAction(onClick = onClose) { LogoutGlyph(it) }
@@ -159,7 +164,7 @@ internal fun MainScreen(
                 if (showDashboard) {
                     DashboardScreen(visibleAccounts, repo, categoryById, balances, refresh)
                 } else if (selected == null) {
-                    EmptyHint(if (accounts.isEmpty()) "Add an account to get started." else "Select an account.")
+                    EmptyHint(if (accounts.isEmpty()) strings.addAccountToStart else strings.selectAccount)
                 } else {
                     AccountDetail(
                         account = selected,
@@ -173,9 +178,9 @@ internal fun MainScreen(
                         categories = categoryById.values.filter { it.enabled == 1L },
                         categoryById = categoryById,
                         onImport = {
-                            val files = openFileDialogs("Import statements (PDF or CSV) — select one or more")
+                            val files = openFileDialogs(strings.importStatementsDialogTitle)
                             if (files.isNotEmpty()) {
-                                busy = "Reading ${files.size} statement${if (files.size > 1) "s" else ""}…"
+                                busy = strings.readingStatements(files.size)
                                 scope.launch {
                                     // PDF parsing is heavy — run it off the UI thread so the app stays responsive.
                                     val results = withContext(Dispatchers.IO) { files.map { runCatching { importService.preview(selected, it) } } }
@@ -183,8 +188,8 @@ internal fun MainScreen(
                                     val failed = results.count { it.isFailure }
                                     status = when {
                                         failed == 0 -> null
-                                        previews.isEmpty() -> "Import failed: ${results.first { it.isFailure }.exceptionOrNull()?.message}"
-                                        else -> "$failed file(s) could not be parsed and were skipped."
+                                        previews.isEmpty() -> strings.importFailed(results.first { it.isFailure }.exceptionOrNull()?.message)
+                                        else -> strings.filesSkipped(failed)
                                     }
                                     busy = null
                                 }
@@ -210,11 +215,11 @@ internal fun MainScreen(
                         onEditOwners = { editOwnersAccount = selected },
                         onManageCategories = { showManageCategories = true },
                         onClassify = {
-                            busy = "Categorizing…"
+                            busy = strings.categorizing
                             scope.launch {
                                 // Categorization can load the embedding model — keep it off the UI thread.
                                 val r = withContext(Dispatchers.IO) { categorizer.classifyAccount(selected.id) }
-                                status = "Applied ${r.committed} rule match(es); ${r.suggested} suggestion(s) to review."
+                                status = strings.categorizeResult(r.committed, r.suggested)
                                 refresh++; busy = null
                             }
                         },
@@ -277,49 +282,46 @@ internal fun MainScreen(
     if (deleteAccount != null) {
         AlertDialog(
             onDismissRequest = { pendingDeleteAccount = null },
-            title = { Text("Delete account?") },
-            text = { Text("Delete \"${deleteAccount.name}\" and all its transactions, holdings and import history? This can't be undone.") },
+            title = { Text(strings.deleteAccountTitle) },
+            text = { Text(strings.deleteAccountBody(deleteAccount.name)) },
             confirmButton = {
                 TextButton(onClick = {
                     repo.deleteAccount(deleteAccount.id)
                     if (selectedAccountId == deleteAccount.id) { selectedAccountId = null; showDashboard = true }
                     pendingDeleteAccount = null; status = null; refresh++
-                }) { Text("Delete") }
+                }) { Text(strings.delete) }
             },
-            dismissButton = { TextButton(onClick = { pendingDeleteAccount = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { pendingDeleteAccount = null }) { Text(strings.cancel) } },
         )
     }
     val deleteBatch = pendingDeleteBatch
     if (deleteBatch != null) {
         AlertDialog(
             onDismissRequest = { pendingDeleteBatch = null },
-            title = { Text("Undo this import?") },
-            text = { Text("Remove \"${deleteBatch.sourceName}\" and the ${deleteBatch.itemCount} item(s) it added? This can't be undone.") },
+            title = { Text(strings.undoImportTitle) },
+            text = { Text(strings.undoImportBody(deleteBatch.sourceName, deleteBatch.itemCount.toInt())) },
             confirmButton = {
-                TextButton(onClick = { repo.deleteBatch(deleteBatch.id); pendingDeleteBatch = null; status = "Removed import \"${deleteBatch.sourceName}\"."; refresh++ }) { Text("Remove") }
+                TextButton(onClick = { repo.deleteBatch(deleteBatch.id); pendingDeleteBatch = null; status = strings.removedImport(deleteBatch.sourceName); refresh++ }) { Text(strings.remove) }
             },
-            dismissButton = { TextButton(onClick = { pendingDeleteBatch = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { pendingDeleteBatch = null }) { Text(strings.cancel) } },
         )
     }
     val reclassify = pendingReclassify
     if (reclassify != null && selected != null) {
-        val categoryName = categoryById[reclassify.categoryId]?.name ?: "this category"
+        val categoryName = categoryById[reclassify.categoryId]?.name ?: strings.thisCategoryFallback
         AlertDialog(
             onDismissRequest = { categorizer.applyToOne(reclassify.txn, reclassify.categoryId); pendingReclassify = null; refresh++ },
-            title = { Text("Apply to similar transactions?") },
-            text = {
-                Text("This merchant has ${reclassify.otherCount} other transaction(s) that aren't set manually. " +
-                    "Set them all to \"$categoryName\" (and remember it), or categorize only this one?")
-            },
+            title = { Text(strings.applyToSimilarTitle) },
+            text = { Text(strings.applyToSimilarBody(reclassify.otherCount, categoryName)) },
             confirmButton = {
                 TextButton(onClick = {
                     categorizer.setCategory(selected.id, reclassify.txn, reclassify.categoryId); pendingReclassify = null; refresh++
-                }) { Text("Apply to all (${reclassify.otherCount + 1})") }
+                }) { Text(strings.applyToAll(reclassify.otherCount + 1)) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     categorizer.applyToOne(reclassify.txn, reclassify.categoryId); pendingReclassify = null; refresh++
-                }) { Text("Only this one") }
+                }) { Text(strings.onlyThisOne) }
             },
         )
     }
@@ -373,13 +375,13 @@ internal fun MainScreen(
         ImportReviewDialog(previews, onDismiss = { previews = emptyList() }, onConfirm = {
             val toCommit = previews
             previews = emptyList()
-            busy = "Importing ${toCommit.sumOf { it.rowCount }} item(s)…"
+            busy = strings.importingItems(toCommit.sumOf { it.rowCount })
             scope.launch {
                 // Commit + categorize off the UI thread (categorization may load the embedding model).
                 val n = withContext(Dispatchers.IO) { toCommit.sumOf { importService.commit(account.id, it) } }
                 val r = withContext(Dispatchers.IO) { categorizer.classifyAccount(account.id) }
-                val src = if (toCommit.size == 1) toCommit.first().sourceName else "${toCommit.size} files"
-                status = "Imported $n item(s) from $src; ${r.committed} categorized, ${r.suggested} to review."
+                val src = if (toCommit.size == 1) toCommit.first().sourceName else strings.filesLabel(toCommit.size)
+                status = strings.importResult(n, src, r.committed, r.suggested)
                 refresh++; busy = null
             }
         })
@@ -408,27 +410,28 @@ private fun Sidebar(
     onDismissProfilesHint: () -> Unit,
     onDismissAccountsHint: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     Column(Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(16.dp)) {
-        NavItem("Overview", selected = dashboardSelected, onClick = onOverview, icon = { OverviewGlyph(it) })
+        NavItem(strings.overview, selected = dashboardSelected, onClick = onOverview, icon = { OverviewGlyph(it) })
         Spacer(Modifier.height(16.dp))
-        SectionHeader("Profiles", onAdd = onAddProfile, onManage = if (profiles.isNotEmpty()) onManageProfiles else null)
+        SectionHeader(strings.profiles, onAdd = onAddProfile, onManage = if (profiles.isNotEmpty()) onManageProfiles else null)
         Spacer(Modifier.height(6.dp))
         if (profiles.isEmpty()) {
             // Profiles are optional, so make clear what they're for rather than showing a lone "All" chip.
             if (profilesHintVisible) {
                 EmptyCallout(
-                    title = "No profiles yet",
-                    body = "Add people (e.g. household members) to filter accounts by owner and mark joint accounts.",
-                    action = "+ Add profile",
+                    title = strings.noProfilesTitle,
+                    body = strings.noProfilesBody,
+                    action = strings.addProfileAction,
                     onAction = onAddProfile,
                     onDismiss = onDismissProfilesHint,
                 )
             } else {
-                Text("No profiles.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(strings.noProfilesShort, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             FlowRowChips {
-                Chip("All", selected = filterProfileId == null, onClick = { onFilter(null) })
+                Chip(strings.all, selected = filterProfileId == null, onClick = { onFilter(null) })
                 profiles.forEach { profile ->
                     Chip(profile.name, selected = filterProfileId == profile.id, dot = parseHexColor(profile.color), onClick = { onFilter(profile.id) })
                 }
@@ -436,20 +439,19 @@ private fun Sidebar(
         }
 
         Spacer(Modifier.height(20.dp))
-        SectionHeader("Accounts", onAdd = onAddAccount)
+        SectionHeader(strings.accounts, onAdd = onAddAccount)
         Spacer(Modifier.height(6.dp))
         if (accounts.isEmpty()) {
             if (accountsHintVisible) {
                 EmptyCallout(
-                    title = if (filterProfileId == null) "No accounts yet" else "No accounts for this profile",
-                    body = if (filterProfileId == null) "Add a Girokonto, Kreditkarte or Depot, then import a statement (PDF or CSV)."
-                        else "This profile doesn't own any accounts. Pick “All” to see every account.",
-                    action = if (filterProfileId == null) "+ Add account" else null,
+                    title = if (filterProfileId == null) strings.noAccountsTitle else strings.noAccountsForProfileTitle,
+                    body = if (filterProfileId == null) strings.addAccountBody else strings.noAccountsForProfileBody,
+                    action = if (filterProfileId == null) strings.addAccountAction else null,
                     onAction = onAddAccount,
                     onDismiss = onDismissAccountsHint,
                 )
             } else {
-                Text("No accounts.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(strings.noAccountsShort, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

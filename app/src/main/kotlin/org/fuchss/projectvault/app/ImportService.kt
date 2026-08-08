@@ -36,16 +36,6 @@ object ImportSupport {
         AccountType.GIRO, AccountType.TAGESGELD, AccountType.KREDITKARTE -> "DKB"
         AccountType.DEPOT -> "ING"
     }
-
-    /** A one-line hint of what can be imported for this account type. */
-    fun hint(type: AccountType): String = when (type) {
-        AccountType.GIRO, AccountType.TAGESGELD ->
-            "Import: DKB Kontoauszug (PDF) or Umsatzliste (CSV)"
-        AccountType.KREDITKARTE ->
-            "Import: DKB Kreditkartenabrechnung (PDF) or Umsatzliste (CSV)"
-        AccountType.DEPOT ->
-            "Import: ING Depotauszug (PDF) or Depotübersicht (CSV)"
-    }
 }
 
 /**
@@ -78,14 +68,15 @@ sealed interface ImportPreview {
         override val verifiable get() = check.verifiable
         override val rowCount get() = rows.size
         override val summary get() = buildString {
-            append("${rows.size} transactions")
-            if (duplicateCount > 0) append(" ($newCount new, $duplicateCount already imported)")
-            append(" - balance ")
+            val s = I18n.current
+            append(s.transactionsCount(rows.size))
+            if (duplicateCount > 0) append(s.newVsImported(newCount, duplicateCount))
+            append(s.balanceWord)
             append(
                 when {
-                    check.ok -> "reconciles"
-                    !check.verifiable -> "not verifiable from this export"
-                    else -> "does NOT reconcile (review)"
+                    check.ok -> s.balanceReconciles
+                    !check.verifiable -> s.balanceNotVerifiableShort
+                    else -> s.balanceDoesNotReconcile
                 }
             )
         }
@@ -101,8 +92,7 @@ sealed interface ImportPreview {
         override val ok get() = check.ok
         override val verifiable get() = check.totalValueCents != null
         override val rowCount get() = rows.size
-        override val summary get() =
-            "${rows.size} holdings - total ${if (check.ok) "reconciles" else "does NOT reconcile (review)"}"
+        override val summary get() = I18n.current.holdingsSummary(rows.size, check.ok)
     }
 }
 
@@ -119,7 +109,7 @@ class ImportService(private val repo: VaultRepository) {
             val warnings = mismatchWarnings(account.institution, account.iban, result.statement.institution, null).toMutableList()
             val valuationDate = result.statement.valuationDate
             if (valuationDate != null && repo.valuationDates(account.id).contains(valuationDate.toEpochDay())) {
-                warnings += "A snapshot for $valuationDate already exists and will be replaced."
+                warnings += I18n.current.snapshotExistsReplace(valuationDate.toString())
             }
             ImportPreview.Depot(
                 statement = result.statement,
@@ -162,7 +152,7 @@ class ImportService(private val repo: VaultRepository) {
             val newCount = rows.size - duplicateCount
             val warnings = mismatchWarnings(account.institution, account.iban, result.statement.institution, result.statement.iban).toMutableList()
             if (rows.isNotEmpty() && newCount == 0) {
-                warnings += "Already imported: all ${rows.size} transactions are duplicates (nothing new to add)."
+                warnings += I18n.current.allDuplicates(rows.size)
             }
             ImportPreview.Transactions(
                 statement = result.statement,
@@ -233,11 +223,11 @@ class ImportService(private val repo: VaultRepository) {
             val ai = accountIban?.let(::normalizeIban)
             val si = statementIban?.let(::normalizeIban)
             if (!ai.isNullOrBlank() && !si.isNullOrBlank() && ai != si) {
-                warnings += "IBAN does not match: account $accountIban vs statement $statementIban"
+                warnings += I18n.current.ibanMismatch(accountIban!!, statementIban!!)
             }
             val ab = accountBank?.trim()
             if (!ab.isNullOrBlank() && !statementBank.isNullOrBlank() && !institutionMatches(ab, statementBank)) {
-                warnings += "Bank does not match: account \"$ab\" vs statement \"$statementBank\""
+                warnings += I18n.current.bankMismatch(ab, statementBank)
             }
             return warnings
         }

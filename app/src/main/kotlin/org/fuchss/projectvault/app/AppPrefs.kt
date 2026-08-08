@@ -44,5 +44,6 @@ class AppPrefs(private val storeFile: File) {
         const val HINT_ACCOUNTS_DISMISSED = "hint.accounts.dismissed"
         const val LAST_VAULT_PATH = "last.vault.path"
         const val THEME_MODE = "theme.mode"
+        const val LANGUAGE = "language"
     }
 }
