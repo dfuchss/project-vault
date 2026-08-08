@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenuItem
@@ -92,6 +93,7 @@ internal fun AccountDetail(
     val txnMonths = remember(txns) {
         txns.map { YearMonth.from(LocalDate.ofEpochDay(it.bookingDate)) }.distinct().sortedDescending()
     }
+    var showImportHistory by remember(account.id) { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         // header bar
@@ -134,6 +136,11 @@ internal fun AccountDetail(
                 }
                 if (ImportSupport.isSupported(account.type)) {
                     Button(onClick = onImport) { Text("Import statement…") }
+                }
+                if (batches.isNotEmpty()) {
+                    TextButton(onClick = { showImportHistory = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+                        Text("History (${batches.size})", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
                 TextButton(onClick = onDeleteAccount, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
                     Text("Delete", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
@@ -194,10 +201,11 @@ internal fun AccountDetail(
                     }
                 }
             }
-            Spacer(Modifier.width(16.dp))
-            // inspector: transaction detail + origin + category picker, else import history
-            Column(Modifier.width(300.dp).fillMaxHeight()) {
-                if (selectedTxn != null && account.type != AccountType.DEPOT) {
+            // Inspector (transaction detail + origin + category picker) — only when a row is selected,
+            // so the list uses full width the rest of the time. Import history lives behind "History".
+            if (selectedTxn != null && account.type != AccountType.DEPOT) {
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.width(300.dp).fillMaxHeight()) {
                     TxnInspector(
                         txn = selectedTxn,
                         batch = repo.batch(selectedTxn.importBatchId),
@@ -209,11 +217,13 @@ internal fun AccountDetail(
                         onDismissSuggestion = { onDismissSuggestion(selectedTxn) },
                         onManageCategories = onManageCategories,
                     )
-                } else {
-                    ImportHistory(batches, onDeleteBatch)
                 }
             }
         }
+    }
+
+    if (showImportHistory) {
+        ImportHistoryDialog(batches = batches, onDeleteBatch = onDeleteBatch, onDismiss = { showImportHistory = false })
     }
 }
 
@@ -502,16 +512,17 @@ private fun TxnInspector(
     }
 }
 
+/** Import history, on demand: a dialog listing each import batch with an "Undo" action. */
 @Composable
-private fun ImportHistory(batches: List<ImportBatch>, onDeleteBatch: (ImportBatch) -> Unit) {
-    Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text("Import history", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(10.dp))
+private fun ImportHistoryDialog(batches: List<ImportBatch>, onDeleteBatch: (ImportBatch) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Import history") },
+        text = {
             if (batches.isEmpty()) {
                 Text("Nothing imported yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                LazyColumn(Modifier.width(420.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(batches) { b ->
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -528,8 +539,9 @@ private fun ImportHistory(batches: List<ImportBatch>, onDeleteBatch: (ImportBatc
                     }
                 }
             }
-        }
-    }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }
 
 // ---------------------------------------------------------------- Depot pane
