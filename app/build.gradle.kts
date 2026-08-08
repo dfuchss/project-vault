@@ -1,4 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -62,6 +63,49 @@ compose.desktop {
             }
             linux { iconFile.set(project.file("icons/app-icon.png")) }
             windows { iconFile.set(project.file("icons/app-icon.ico")) }
+        }
+    }
+}
+
+// `iconFile` above only reaches the .app inside the DMG. The disk image itself keeps Java's
+// stock artwork: jpackage copies its bundled JavaApp.icns into the volume as `.VolumeIcon.icns`
+// (so the install window is branded with a coffee cup) and the .dmg file gets no Finder icon at
+// all. The supported fix — a `<PackageName>-volume.icns` in jpackage's `--resource-dir` — is out
+// of reach because the Compose plugin owns that directory and wipes it inside the task action
+// (AbstractJPackageTask.prepareWorkingDir), leaving no window to drop a file in. So we re-brand
+// the finished image instead; see app/scripts/set-dmg-icon.sh.
+//
+// This is a `doLast` on the packaging task rather than a follow-up task on purpose: Gradle
+// snapshots outputs after all actions run, so the re-branded DMG *is* the recorded output and a
+// second `packageDmg` still resolves to UP-TO-DATE.
+if (System.getProperty("os.name").startsWith("Mac", ignoreCase = true)) {
+    val brandDmgScript = project.file("scripts/set-dmg-icon.sh")
+    val brandDmgIcon = project.file("icons/app-icon.icns")
+
+    // Compose registers packageDmg/packageReleaseDmg late (afterEvaluate), so match by type and
+    // filter on the format rather than looking the names up eagerly.
+    tasks.withType<AbstractJPackageTask>().configureEach {
+        if (targetFormat != TargetFormat.Dmg) return@configureEach
+
+        inputs.file(brandDmgScript).withPropertyName("dmgIconScript")
+        inputs.file(brandDmgIcon).withPropertyName("dmgVolumeIcon")
+
+        doLast {
+            val dmgs = destinationDir.get().asFile.listFiles { f: File -> f.extension == "dmg" }.orEmpty()
+            if (dmgs.isEmpty()) throw GradleException("$name produced no .dmg to brand")
+
+            dmgs.forEach { dmg ->
+                val process = ProcessBuilder(
+                    "/bin/bash",
+                    brandDmgScript.absolutePath,
+                    dmg.absolutePath,
+                    brandDmgIcon.absolutePath,
+                ).redirectErrorStream(true).start()
+                process.inputStream.bufferedReader().forEachLine { logger.lifecycle(it) }
+                if (process.waitFor() != 0) {
+                    throw GradleException("Could not set the DMG icon on ${dmg.name}")
+                }
+            }
         }
     }
 }

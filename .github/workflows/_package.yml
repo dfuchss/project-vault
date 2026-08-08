@@ -47,6 +47,10 @@ jobs:
         shell: bash
         run: ./gradlew --no-daemon ${{ matrix.gradle_task }}
 
+      # The DMG's *volume* icon (app/scripts/set-dmg-icon.sh) is content inside the image and
+      # survives this. The .dmg file's own Finder icon lives in a resource fork that
+      # upload-artifact/GitHub Releases strip, so a downloaded DMG shows the generic disk icon
+      # until it is mounted — expected, not a packaging bug.
       - name: Collect DMG (macOS)
         if: matrix.name == 'macos'
         shell: bash
