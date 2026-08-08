@@ -105,11 +105,12 @@ internal fun AccountDetail(
                 horizontalArrangement = Arrangement.spacedBy(20.dp),
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(account.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(account.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(6.dp))
+                    // Identity row: account type + inline owner editing. The IBAN lives on its own line
+                    // below so a long IBAN can never squeeze the owner chips into unreadable wrapping.
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Badge(accountTypeLabel(account.type))
-                        account.iban?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         // Owners are editable inline: click to assign this account to profiles (joint = several).
                         Surface(onClick = onEditOwners, shape = RoundedCornerShape(50), color = Color.Transparent) {
                             Row(
@@ -118,17 +119,21 @@ internal fun AccountDetail(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 if (owners.isEmpty()) {
-                                    Text(strings.assignOwner, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                    Text(strings.assignOwner, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
                                 } else {
                                     owners.forEach {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Dot(parseHexColor(it.color)); Spacer(Modifier.width(4.dp)); Text(it.name, style = MaterialTheme.typography.labelSmall)
+                                            Dot(parseHexColor(it.color)); Spacer(Modifier.width(4.dp)); Text(it.name, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
                                     }
-                                    Text(strings.edit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                    Text(strings.edit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
                                 }
                             }
                         }
+                    }
+                    account.iban?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 Column(horizontalAlignment = Alignment.End) {
