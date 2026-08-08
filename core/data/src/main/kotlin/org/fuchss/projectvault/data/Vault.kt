@@ -1,6 +1,8 @@
 package org.fuchss.projectvault.data
 
 import app.cash.sqldelight.EnumColumnAdapter
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlCursor
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import org.fuchss.projectvault.data.db.Account
@@ -97,6 +99,27 @@ object VaultManager {
             """.trimIndent(),
             0,
         )
+        addColumnIfMissing(driver, table = "category", column = "enabled", ddl = "INTEGER NOT NULL DEFAULT 1")
+    }
+
+    /**
+     * Adds a column to an existing table if it isn't there yet — the ADD COLUMN counterpart to the
+     * CREATE TABLE shims above, for columns introduced after a vault was first created. SQLite has no
+     * `ADD COLUMN IF NOT EXISTS`, so we check `pragma_table_info` first (no-op on new vaults).
+     */
+    private fun addColumnIfMissing(driver: SqlDriver, table: String, column: String, ddl: String) {
+        val count = driver.executeQuery(
+            null,
+            "SELECT COUNT(*) FROM pragma_table_info('$table') WHERE name = '$column'",
+            { cursor: SqlCursor ->
+                cursor.next()
+                QueryResult.Value(cursor.getLong(0) ?: 0L)
+            },
+            0,
+        ).value
+        if (count == 0L) {
+            driver.execute(null, "ALTER TABLE $table ADD COLUMN $column $ddl", 0)
+        }
     }
 
     private fun connect(path: File): SqlDriver =

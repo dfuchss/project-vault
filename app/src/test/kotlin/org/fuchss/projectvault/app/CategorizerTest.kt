@@ -183,6 +183,48 @@ class CategorizerTest {
     }
 
     @Test
+    fun `disabling a category reassigns its entries to Sonstiges and stops its rule committing`() {
+        val (repo, categorizer, account) = setup()
+        repo.insertTransactions(account, null, listOf(tx("REWE.Markt.Eins/DE", "a")))
+        categorizer.classifyAccount(account)
+        assertEquals("cat-groceries", repo.transactions(account).single().categoryId)
+
+        repo.disableCategory("cat-groceries", CAT_OTHER)
+        assertEquals(CAT_OTHER, repo.transactions(account).single().categoryId, "existing entry moved to Sonstiges")
+
+        // A fresh REWE transaction must no longer auto-commit to the disabled grocery category.
+        repo.insertTransactions(account, null, listOf(tx("REWE.Markt.Zwei/DE", "b")))
+        categorizer.classifyAccount(account)
+        assertNull(
+            repo.transactions(account).first { it.counterparty == "REWE.Markt.Zwei/DE" }.categoryId,
+            "a disabled category's rule must not commit",
+        )
+    }
+
+    @Test
+    fun `addCategory with keywords learns rules that classify matching transactions`() {
+        val (repo, categorizer, account) = setup()
+        val id = categorizer.addCategory("Spenden", CategoryKind.EXPENSE, "#445566", listOf("BETTERPLACE"))
+        repo.insertTransactions(account, null, listOf(tx("BETTERPLACE gemeinnuetzig", "a")))
+        categorizer.classifyAccount(account)
+        assertEquals(id, repo.transactions(account).single().categoryId, "keyword rule classifies into the new category")
+    }
+
+    @Test
+    fun `editing a category's keywords replaces its rules`() {
+        val (repo, categorizer, account) = setup()
+        val id = categorizer.addCategory("Spenden", CategoryKind.EXPENSE, "#445566", listOf("BETTERPLACE"))
+        categorizer.updateCategory(id, "Spenden", "#445566", listOf("GOFUNDME"))   // drop BETTERPLACE, add GOFUNDME
+
+        repo.insertTransactions(account, null, listOf(tx("BETTERPLACE gGmbH", "a"), tx("GOFUNDME campaign", "b")))
+        categorizer.classifyAccount(account)
+
+        val byCp = repo.transactions(account).associateBy { it.counterparty }
+        assertNull(byCp["BETTERPLACE gGmbH"]!!.categoryId, "the removed keyword no longer classifies")
+        assertEquals(id, byCp["GOFUNDME campaign"]!!.categoryId, "the new keyword classifies")
+    }
+
+    @Test
     fun `learns a rule from a correction and applies it to similar transactions`() {
         val (repo, categorizer, account) = setup()
         repo.insertTransactions(account, null, listOf(

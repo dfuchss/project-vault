@@ -136,6 +136,26 @@ class VaultRepository(private val db: VaultDatabase) {
     fun updateCategoryMeta(id: String, name: String, color: String?) =
         db.categoryQueries.updateCategoryMeta(name, color, id)
 
+    /** How many transactions are currently committed to this category (drives the disable warning). */
+    fun categoryTxnCount(id: String): Long = db.txnQueries.countTxnsByCategory(id).executeAsOne()
+
+    /** Re-enables a previously disabled category so it reappears in pickers and classifier output. */
+    fun enableCategory(id: String) = db.categoryQueries.setCategoryEnabled(1L, id)
+
+    /**
+     * Disables a category the user doesn't want: its committed entries are reassigned to [fallbackId]
+     * (Sonstiges), any pending suggestions pointing at it are cleared, and it's flagged disabled — all
+     * in one transaction. Learned rules are left intact but ignored while disabled (see the classifier),
+     * so re-enabling restores auto-classification. Reassignment is one-way.
+     */
+    fun disableCategory(id: String, fallbackId: String) {
+        db.transaction {
+            db.txnQueries.reassignCategoryReferences(fallbackId, id)
+            db.txnQueries.clearSuggestionReferences(id)
+            db.categoryQueries.setCategoryEnabled(0L, id)
+        }
+    }
+
     /**
      * Deletes a (user-defined) category. Only non-system categories should be passed; the caller is
      * responsible for that check. All references are cleared first so nothing dangles: transactions
@@ -161,6 +181,9 @@ class VaultRepository(private val db: VaultDatabase) {
     fun deleteUserRuleByKeyword(keyword: String) = db.categoryRuleQueries.deleteUserRuleByKeyword(keyword)
 
     fun deleteRuleById(id: String) = db.categoryRuleQueries.deleteRuleById(id)
+
+    /** Removes every rule pointing at a category (used when replacing a user category's keywords). */
+    fun deleteRulesByCategory(categoryId: String) = db.categoryRuleQueries.deleteRulesByCategory(categoryId)
 
     fun setTransactionCategory(txnId: String, categoryId: String?, source: String?) =
         db.txnQueries.updateTxnCategory(categoryId, source, txnId)

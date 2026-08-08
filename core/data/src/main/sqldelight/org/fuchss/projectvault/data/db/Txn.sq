@@ -61,6 +61,14 @@ UPDATE txn SET categoryId = NULL, categorySource = NULL WHERE categoryId = ?;
 clearSuggestionReferences:
 UPDATE txn SET suggestedCategoryId = NULL WHERE suggestedCategoryId = ?;
 
+-- Used when a category is disabled: move its committed entries to another category (Sonstiges),
+-- preserving each row's categorySource.
+reassignCategoryReferences:
+UPDATE txn SET categoryId = :newCategoryId WHERE categoryId = :oldCategoryId;
+
+countTxnsByCategory:
+SELECT COUNT(*) FROM txn WHERE categoryId = ?;
+
 sumByCategoryForAccount:
 SELECT categoryId, SUM(amountCents) AS total, COUNT(*) AS count
 FROM txn WHERE accountId = ? GROUP BY categoryId;

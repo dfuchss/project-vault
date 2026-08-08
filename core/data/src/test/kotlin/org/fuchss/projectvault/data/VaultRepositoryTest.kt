@@ -180,6 +180,28 @@ class VaultRepositoryTest {
     }
 
     @Test
+    fun `disabling a category reassigns its entries to the fallback, clears suggestions, and is reversible`() {
+        val repo = repo()
+        val account = repo.addAccount("Giro", AccountType.GIRO)
+        repo.insertCategory("cat-other", "Sonstiges", CategoryKind.EXPENSE, "#9AA6AD", isSystem = true)
+        val catId = repo.addCategory("Events", CategoryKind.EXPENSE, "#C2185B")
+        repo.insertTransactions(account, null, listOf(tx(2, -1160, "h1"), tx(3, -800, "h2")))
+        val txns = repo.transactions(account)
+        repo.setTransactionCategory(txns[0].id, catId, "MANUAL")   // committed to the category
+        repo.setSuggestedCategory(txns[1].id, catId)                // a pending suggestion for it
+
+        repo.disableCategory(catId, "cat-other")
+
+        assertEquals("cat-other", repo.transactions(account).first { it.id == txns[0].id }.categoryId, "committed entry moves to Sonstiges")
+        assertNull(repo.transactions(account).first { it.id == txns[1].id }.suggestedCategoryId, "its suggestion is cleared")
+        assertEquals(0L, repo.categories().first { it.id == catId }.enabled, "category flagged disabled")
+        assertEquals(0L, repo.categoryTxnCount(catId), "no transactions remain in the disabled category")
+
+        repo.enableCategory(catId)
+        assertEquals(1L, repo.categories().first { it.id == catId }.enabled, "re-enabling restores the flag")
+    }
+
+    @Test
     fun `deleting an account removes its transactions, batches and ownership`() {
         val repo = repo()
         val alice = repo.addProfile("Alice")

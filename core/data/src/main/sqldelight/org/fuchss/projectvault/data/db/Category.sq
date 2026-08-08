@@ -1,6 +1,8 @@
 import org.fuchss.projectvault.model.CategoryKind;
 
 -- Hierarchical spending/income categories. `isSystem` (0/1) marks built-in seed categories.
+-- `enabled` (0/1) lets the user hide categories they don't use: disabled ones are dropped from the
+-- pickers and from classifier suggestions (their entries are reassigned to Sonstiges on disable).
 CREATE TABLE category (
     id TEXT NOT NULL PRIMARY KEY,
     parentId TEXT,
@@ -9,6 +11,7 @@ CREATE TABLE category (
     icon TEXT,
     color TEXT,
     isSystem INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (parentId) REFERENCES category(id) ON DELETE SET NULL
 );
 
@@ -21,6 +24,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 
 updateCategoryMeta:
 UPDATE category SET name = ?, color = ? WHERE id = ?;
+
+setCategoryEnabled:
+UPDATE category SET enabled = ? WHERE id = ?;
 
 deleteCategory:
 DELETE FROM category WHERE id = ?;

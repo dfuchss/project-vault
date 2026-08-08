@@ -63,7 +63,6 @@ internal fun AccountDetail(
     categoryById: Map<String, Category>,
     onImport: () -> Unit,
     onSetCategory: (Txn, String) -> Unit,
-    onNewCategory: (Txn) -> Unit,
     onAcceptSuggestion: (Txn, String) -> Unit,
     onDismissSuggestion: (Txn) -> Unit,
     onDeleteBatch: (ImportBatch) -> Unit,
@@ -187,7 +186,6 @@ internal fun AccountDetail(
                         current = selectedTxn.categoryId?.let { categoryById[it] },
                         suggested = selectedTxn.suggestedCategoryId?.let { categoryById[it] },
                         onSetCategory = { onSetCategory(selectedTxn, it) },
-                        onNewCategory = { onNewCategory(selectedTxn) },
                         onAcceptSuggestion = { onAcceptSuggestion(selectedTxn, it) },
                         onDismissSuggestion = { onDismissSuggestion(selectedTxn) },
                         onManageCategories = onManageCategories,
@@ -302,7 +300,6 @@ private fun TxnInspector(
     current: Category?,
     suggested: Category?,
     onSetCategory: (String) -> Unit,
-    onNewCategory: () -> Unit,
     onAcceptSuggestion: (String) -> Unit,
     onDismissSuggestion: () -> Unit,
     onManageCategories: () -> Unit,
@@ -338,10 +335,6 @@ private fun TxnInspector(
                         )
                     }
                     HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text("＋ New category…") },
-                        onClick = { expanded = false; onNewCategory() },
-                    )
                     DropdownMenuItem(
                         text = { Text("⚙ Manage categories…") },
                         onClick = { expanded = false; onManageCategories() },

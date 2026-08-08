@@ -10,6 +10,7 @@ import org.fuchss.projectvault.classification.SeedCatalog
 import org.fuchss.projectvault.data.VaultRepository
 import org.fuchss.projectvault.data.db.Txn
 import org.fuchss.projectvault.model.AccountType
+import org.fuchss.projectvault.model.CategoryKind
 
 /** How a transaction's committed category was set — recorded so manual choices stay sticky. */
 object CategorySource {
@@ -24,6 +25,9 @@ data class ClassifyResult(val committed: Int, val suggested: Int)
 // Stable seed-category ids used for account-type defaults (see SeedCatalog).
 private const val CAT_TRANSFERS = "cat-transfers"
 private const val CAT_INCOME = "cat-income"
+
+/** The protected expense fallback (Sonstiges). It can never be disabled and is the reassign target. */
+internal const val CAT_OTHER = "cat-other"
 
 /**
  * Transaction categorization wired to the vault. Tier 1 = keyword rules (seed + learned USER rules);
@@ -65,9 +69,20 @@ class Categorizer(
             .forEach { repo.deleteRuleById(it.id) }
     }
 
-    private fun ruleEngine(): RuleEngine = RuleEngine(
-        repo.categoryRules().map { CategoryRule(it.keyword, it.categoryId, it.priority.toInt(), RuleSource.valueOf(it.source)) },
-    )
+    /** Ids of categories currently enabled — disabled ones are excluded from all classifier output. */
+    private fun enabledCategoryIds(): Set<String> =
+        repo.categories().filterTo(HashSet()) { it.enabled == 1L }.mapTo(HashSet()) { it.id }
+
+    private fun ruleEngine(): RuleEngine {
+        // Rules that point at a disabled category are ignored, so a disabled category is never
+        // auto-committed. The rules stay in the DB, so re-enabling restores the behaviour.
+        val enabled = enabledCategoryIds()
+        return RuleEngine(
+            repo.categoryRules()
+                .filter { it.categoryId in enabled }
+                .map { CategoryRule(it.keyword, it.categoryId, it.priority.toInt(), RuleSource.valueOf(it.source)) },
+        )
+    }
 
     /**
      * Tier 1 rules **commit** categories (they're reliable); Tier 2 embeddings only **suggest** them
@@ -107,9 +122,12 @@ class Categorizer(
             .filter { it.categoryId == null && it.suggestedCategoryId == null }
         if (needsSuggestion.isEmpty()) return 0
 
-        val categories = repo.categories()
+        // Only enabled categories can be suggested — disabled ones are dropped from both the zero-shot
+        // prototypes and the few-shot examples.
+        val enabled = enabledCategoryIds()
+        val categories = repo.categories().filter { it.enabled == 1L }
         val keywordsByCategory = repo.categoryRules().groupBy { it.categoryId }
-        val examples = repo.transactions(accountId).filter { it.categoryId != null }
+        val examples = repo.transactions(accountId).filter { it.categoryId != null && it.categoryId in enabled }
 
         // Zero-shot prototypes (category name + its keywords) + few-shot examples (committed categories).
         val prototypeTexts = categories.map { c ->
@@ -167,6 +185,31 @@ class Categorizer(
                     repo.clearSuggestion(other.id)
                 }
             }
+    }
+
+    /**
+     * Creates a new category and, for any [keywords], learns USER rules (priority 100, so they take
+     * effect over seed rules) that auto-classify matching transactions into it on the next pass.
+     */
+    fun addCategory(name: String, kind: CategoryKind, color: String, keywords: List<String> = emptyList()): String {
+        val id = repo.addCategory(name, kind, color)
+        keywords.forEach { repo.addRule(it, id, priority = 100, source = RuleSource.USER.name) }
+        return id
+    }
+
+    /** The current keyword rules for a category (used to pre-fill the edit dialog). */
+    fun keywordsFor(categoryId: String): List<String> =
+        repo.categoryRules().filter { it.categoryId == categoryId }.map { it.keyword }
+
+    /**
+     * Updates a user category's name/colour and **replaces** its keyword rules with [keywords]. Only
+     * safe for user categories (all their rules are USER rules); system categories are synced from the
+     * catalog by [ensureSeeded], so they aren't edited here.
+     */
+    fun updateCategory(id: String, name: String, color: String, keywords: List<String>) {
+        repo.updateCategoryMeta(id, name, color)
+        repo.deleteRulesByCategory(id)
+        keywords.forEach { repo.addRule(it, id, priority = 100, source = RuleSource.USER.name) }
     }
 
     /** Categorizes only this transaction — no rule learned, nothing else touched. */

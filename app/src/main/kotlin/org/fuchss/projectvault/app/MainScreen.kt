@@ -56,6 +56,7 @@ import org.fuchss.projectvault.classification.DjlEmbedder
 import org.fuchss.projectvault.data.Vault
 import org.fuchss.projectvault.data.VaultRepository
 import org.fuchss.projectvault.data.db.Account
+import org.fuchss.projectvault.data.db.Category
 import org.fuchss.projectvault.data.db.ImportBatch
 import org.fuchss.projectvault.data.db.Profile
 import org.fuchss.projectvault.data.db.Txn
@@ -93,7 +94,8 @@ internal fun MainScreen(
     var showAddProfile by remember { mutableStateOf(false) }
     var showManageProfiles by remember { mutableStateOf(false) }
     var editOwnersAccount by remember { mutableStateOf<Account?>(null) }
-    var newCategoryForTxn by remember { mutableStateOf<Txn?>(null) }
+    var showAddCategory by remember { mutableStateOf(false) }
+    var editingCategory by remember { mutableStateOf<Category?>(null) }
     var showManageCategories by remember { mutableStateOf(false) }
     var pendingReclassify by remember { mutableStateOf<PendingReclassify?>(null) }
     var pendingDeleteBatch by remember { mutableStateOf<ImportBatch?>(null) }
@@ -166,7 +168,9 @@ internal fun MainScreen(
                         balance = balances[selected.id],
                         refreshKey = refresh,
                         status = status,
-                        categories = categoryById.values.toList(),
+                        // Only enabled categories are selectable/filterable; categoryById keeps the full
+                        // set so chips on any lingering reference still render.
+                        categories = categoryById.values.filter { it.enabled == 1L },
                         categoryById = categoryById,
                         onImport = {
                             val files = openFileDialogs("Import statements (PDF or CSV) — select one or more")
@@ -195,7 +199,6 @@ internal fun MainScreen(
                             if (n > 0) pendingReclassify = PendingReclassify(txn, categoryId, n)
                             else { categorizer.applyToOne(txn, categoryId); refresh++ }
                         },
-                        onNewCategory = { txn -> newCategoryForTxn = txn },
                         onAcceptSuggestion = { txn, categoryId ->
                             val n = categorizer.otherMatchesCount(selected.id, txn, categoryId)
                             if (n > 0) pendingReclassify = PendingReclassify(txn, categoryId, n)
@@ -320,25 +323,39 @@ internal fun MainScreen(
             },
         )
     }
-    val catTxn = newCategoryForTxn
-    if (catTxn != null && selected != null) {
-        val kinds = allowedKindsForAmount(catTxn.amountCents)
-        AddCategoryDialog(
-            initialKind = kinds.first(),
-            allowedKinds = kinds,
-            onDismiss = { newCategoryForTxn = null },
-            onAdd = { name, kind, color ->
-                val id = repo.addCategory(name, kind, color)
-                categorizer.setCategory(selected.id, catTxn, id)
-                newCategoryForTxn = null; refresh++
-            },
-        )
-    }
     if (showManageCategories) {
         ManageCategoriesDialog(
             categories = categoryById.values.sortedBy { it.name },
+            txnCountFor = { id -> repo.categoryTxnCount(id).toInt() },
+            onAddCategory = { showAddCategory = true },
+            onEditCategory = { editingCategory = it },
             onDelete = { id -> repo.deleteCategory(id); refresh++ },
+            onDisable = { id -> repo.disableCategory(id, CAT_OTHER); refresh++ },
+            onEnable = { id -> repo.enableCategory(id); refresh++ },
             onDismiss = { showManageCategories = false },
+        )
+    }
+    if (showAddCategory) {
+        // Adding from Manage isn't tied to a transaction, so every kind is offered. Keywords (if any)
+        // become learned rules that classify matching transactions on the next categorize pass.
+        AddCategoryDialog(
+            onDismiss = { showAddCategory = false },
+            onAdd = { name, kind, color, keywords ->
+                categorizer.addCategory(name, kind, color, keywords)
+                showAddCategory = false; refresh++
+            },
+        )
+    }
+    val editCat = editingCategory
+    if (editCat != null) {
+        EditCategoryDialog(
+            category = editCat,
+            initialKeywords = categorizer.keywordsFor(editCat.id),
+            onDismiss = { editingCategory = null },
+            onSave = { name, color, keywords ->
+                categorizer.updateCategory(editCat.id, name, color, keywords)
+                editingCategory = null; refresh++
+            },
         )
     }
     if (showAddAccount) {
