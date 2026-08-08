@@ -7,6 +7,7 @@ import org.fuchss.projectvault.imports.csv.CsvDocument
 import org.fuchss.projectvault.imports.csv.CsvStatementTemplate
 import org.fuchss.projectvault.imports.csv.balanceToCents
 import org.fuchss.projectvault.imports.parse.GermanFormats
+import org.fuchss.projectvault.model.Bank
 
 /**
  * DKB Visa credit-card "Umsatzliste" CSV export.
@@ -21,6 +22,7 @@ import org.fuchss.projectvault.imports.parse.GermanFormats
  */
 class DkbCsvCreditCardTemplate : CsvStatementTemplate {
     override val id = "dkb-csv-visa"
+    override val bank = Bank.DKB
     override val kind = StatementKind.CREDIT_CARD
 
     override fun matches(doc: CsvDocument): Boolean {

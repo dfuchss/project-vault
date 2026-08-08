@@ -6,6 +6,7 @@ import org.fuchss.projectvault.data.NewTransaction
 import org.fuchss.projectvault.data.VaultRepository
 import org.fuchss.projectvault.data.db.Account
 import org.fuchss.projectvault.imports.BalanceCheck
+import org.fuchss.projectvault.imports.BankCatalog
 import org.fuchss.projectvault.imports.DepotCheck
 import org.fuchss.projectvault.imports.DepotImporter
 import org.fuchss.projectvault.imports.Dedup
@@ -14,28 +15,45 @@ import org.fuchss.projectvault.imports.ParsedStatement
 import org.fuchss.projectvault.imports.StatementImporter
 import org.fuchss.projectvault.imports.StatementKind
 import org.fuchss.projectvault.model.AccountType
+import org.fuchss.projectvault.model.Bank
 import java.io.File
 import java.time.LocalDate
 
 /**
- * What each account type can import today (DKB Giro/Tagesgeld/Kreditkarte, ING Depot). The single
- * source of truth used both to route an import to the right templates and to guide the user during
- * account creation.
+ * What can be imported today (DKB Giro/Tagesgeld/Kreditkarte, ING Depot). The single source of truth
+ * used both to route an import to the right templates and to restrict account creation: the **bank**
+ * decides how a statement is parsed, so an account is created for a (bank, type) pair from
+ * [BankCatalog] — never for a hand-typed institution that no template could ever match.
  */
 object ImportSupport {
-    fun acceptedKinds(type: AccountType): Set<StatementKind> = when (type) {
-        AccountType.GIRO, AccountType.TAGESGELD -> setOf(StatementKind.GIRO)
-        AccountType.KREDITKARTE -> setOf(StatementKind.CREDIT_CARD)
-        AccountType.DEPOT -> setOf(StatementKind.DEPOT)
+    /** The statement kind an account of this type holds. */
+    fun kindFor(type: AccountType): StatementKind = when (type) {
+        AccountType.GIRO, AccountType.TAGESGELD -> StatementKind.GIRO
+        AccountType.KREDITKARTE -> StatementKind.CREDIT_CARD
+        AccountType.DEPOT -> StatementKind.DEPOT
     }
 
-    fun isSupported(type: AccountType): Boolean = acceptedKinds(type).isNotEmpty()
+    fun acceptedKinds(type: AccountType): Set<StatementKind> = setOf(kindFor(type))
 
-    /** The bank to pre-fill for a new account of this type (drives the import mismatch warnings). */
-    fun defaultBank(type: AccountType): String = when (type) {
-        AccountType.GIRO, AccountType.TAGESGELD, AccountType.KREDITKARTE -> "DKB"
-        AccountType.DEPOT -> "ING"
-    }
+    /** The banks offered during account creation. */
+    val banks: List<Bank> get() = BankCatalog.banks
+
+    /** The account types [bank] can be created for — the products it has a parser for. */
+    fun accountTypes(bank: Bank): List<AccountType> =
+        AccountType.entries.filter { BankCatalog.isSupported(bank, kindFor(it)) }
+
+    /** The bank an account is held at, or `null` for a legacy account with a free-text institution. */
+    fun bankOf(account: Account): Bank? = Bank.fromInstitution(account.institution)
+
+    /**
+     * Whether this account can import at all. A legacy account whose institution isn't one of the
+     * known banks stays importable — all templates are then tried, as before.
+     */
+    fun isSupported(account: Account): Boolean =
+        bankOf(account)?.let { BankCatalog.isSupported(it, kindFor(account.type)) } ?: true
+
+    /** The banks an import into this account may come from (all of them for a legacy account). */
+    fun banksFor(account: Account): Set<Bank> = bankOf(account)?.let(::setOf) ?: Bank.entries.toSet()
 }
 
 /**
@@ -105,7 +123,9 @@ class ImportService(private val repo: VaultRepository) {
 
     fun preview(account: Account, file: File): ImportPreview =
         if (account.type == AccountType.DEPOT) {
-            val result = DepotImporter().import(file)
+            // Route by the account's bank as well as its type: a bank's export format is what decides
+            // how a file parses, so an ING file can never be filed into a DKB account (and vice versa).
+            val result = DepotImporter().import(file, ImportSupport.banksFor(account))
             val warnings = mismatchWarnings(account.institution, account.iban, result.statement.institution, null).toMutableList()
             val valuationDate = result.statement.valuationDate
             if (valuationDate != null && repo.valuationDates(account.id).contains(valuationDate.toEpochDay())) {
@@ -122,10 +142,10 @@ class ImportService(private val repo: VaultRepository) {
             )
         } else {
             val accepts = ImportSupport.acceptedKinds(account.type)
-            require(accepts.isNotEmpty()) { "Statement import is not supported for ${account.type} accounts." }
-            // Route by account type: only templates whose kind the account accepts are considered, so a
-            // card statement can't be mis-filed into a Girokonto (it fails with a clear message instead).
-            val result = StatementImporter().import(file, accepts)
+            // Route by account bank + type: only templates of the account's bank whose kind it accepts
+            // are considered, so neither another bank's export nor a card statement can be mis-filed
+            // into a Girokonto (either fails with a clear message instead).
+            val result = StatementImporter().import(file, accepts, ImportSupport.banksFor(account))
             val parsed = result.statement.transactions
             val rows = parsed.map {
                 NewTransaction(

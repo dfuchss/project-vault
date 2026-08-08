@@ -1,6 +1,7 @@
 package org.fuchss.projectvault.imports
 
 import org.fuchss.projectvault.imports.pdf.PdfDocument
+import org.fuchss.projectvault.model.Bank
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -51,6 +52,9 @@ data class DepotImportResult(
 /** A per-institution parser for Depot statements. */
 interface DepotStatementTemplate {
     val id: String
+
+    /** The bank this template parses — used to route by the target account's bank. */
+    val bank: Bank
     fun matches(doc: PdfDocument): Boolean
     fun parse(doc: PdfDocument): ParsedDepotStatement
 }

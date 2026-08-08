@@ -1,6 +1,7 @@
 package org.fuchss.projectvault.imports
 
 import org.fuchss.projectvault.imports.pdf.PdfDocument
+import org.fuchss.projectvault.model.Bank
 import java.time.LocalDate
 
 /** What kind of statement a template produced. */
@@ -66,6 +67,9 @@ data class ImportResult(
 interface StatementTemplate {
     val id: String
 
+    /** The bank this template parses — used to route by the target account's bank. */
+    val bank: Bank
+
     /** What this template produces — used to route by account type (a Giro account rejects a card statement). */
     val kind: StatementKind
     fun matches(doc: PdfDocument): Boolean
@@ -85,6 +89,17 @@ class WrongStatementTypeException(fileName: String, val found: StatementKind, va
     RuntimeException(
         "\"$fileName\" looks like a ${found.label} statement, but this account accepts " +
             "${accepted.joinToString(" / ") { it.label }}. Import it into a matching account.",
+    )
+
+/**
+ * Thrown when a document is recognized but comes from another bank than the target account's — e.g.
+ * an ING export dropped onto a DKB account. The bank decides how a file is parsed, so accounts are
+ * bound to one and imports must match.
+ */
+class WrongBankException(fileName: String, val found: Bank, val expected: Set<Bank>) :
+    RuntimeException(
+        "\"$fileName\" is a ${found.displayName} statement, but this account is held at " +
+            "${expected.joinToString(" / ") { it.displayName }}. Import it into a matching account.",
     )
 
 /** Human-readable statement-kind name for messages. */

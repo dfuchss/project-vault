@@ -6,6 +6,7 @@ import org.fuchss.projectvault.imports.ParsedDepotStatement
 import org.fuchss.projectvault.imports.parse.GermanFormats
 import org.fuchss.projectvault.imports.pdf.PdfDocument
 import org.fuchss.projectvault.imports.pdf.PdfLine
+import org.fuchss.projectvault.model.Bank
 import java.math.BigDecimal
 
 /**
@@ -19,6 +20,7 @@ import java.math.BigDecimal
  */
 class IngDepotTemplate : DepotStatementTemplate {
     override val id = "ing-depot"
+    override val bank = Bank.ING
 
     override fun matches(doc: PdfDocument): Boolean {
         val t = doc.text

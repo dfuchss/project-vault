@@ -1,6 +1,7 @@
 package org.fuchss.projectvault.app
 
 import org.fuchss.projectvault.model.AccountType
+import org.fuchss.projectvault.model.Bank
 import org.fuchss.projectvault.model.CategoryKind
 
 // Strings for the dialogs: profiles, categories, add-account and the import review.
@@ -80,22 +81,23 @@ val Strings.statusBuiltIn get() = translate { en("Built-in"); de("Vorgegeben") }
 // -- Add account -------------------------------------------------------------
 val Strings.addAccountTitle get() = translate { en("Add account"); de("Konto hinzufügen") }
 fun Strings.typeButton(typeLabel: String) = translate { en("Type: $typeLabel"); de("Typ: $typeLabel") }
-val Strings.noImportSuffix get() = translate { en("  ·  no import"); de("  ·  kein Import") }
-val Strings.bankOptional get() = translate { en("Bank (optional)"); de("Bank (optional)") }
+fun Strings.bankButton(bankLabel: String) = translate { en("Bank: $bankLabel"); de("Bank: $bankLabel") }
 val Strings.ibanOptional get() = translate { en("IBAN (optional)"); de("IBAN (optional)") }
 val Strings.ownersJoint get() = translate { en("Owners (joint = several)"); de("Inhaber (gemeinsam = mehrere)") }
-fun Strings.importHint(type: AccountType) = when (type) {
+
+/** What the chosen bank/type combination can import — only supported combinations are offered. */
+fun Strings.importHint(bank: Bank, type: AccountType) = when (type) {
     AccountType.GIRO, AccountType.TAGESGELD -> translate {
-        en("Import: DKB Kontoauszug (PDF) or Umsatzliste (CSV)")
-        de("Import: DKB Kontoauszug (PDF) oder Umsatzliste (CSV)")
+        en("Import: ${bank.displayName} Kontoauszug (PDF) or Umsatzliste (CSV)")
+        de("Import: ${bank.displayName} Kontoauszug (PDF) oder Umsatzliste (CSV)")
     }
     AccountType.KREDITKARTE -> translate {
-        en("Import: DKB Kreditkartenabrechnung (PDF) or Umsatzliste (CSV)")
-        de("Import: DKB Kreditkartenabrechnung (PDF) oder Umsatzliste (CSV)")
+        en("Import: ${bank.displayName} Kreditkartenabrechnung (PDF) or Umsatzliste (CSV)")
+        de("Import: ${bank.displayName} Kreditkartenabrechnung (PDF) oder Umsatzliste (CSV)")
     }
     AccountType.DEPOT -> translate {
-        en("Import: ING Depotauszug (PDF) or Depotübersicht (CSV)")
-        de("Import: ING Depotauszug (PDF) oder Depotübersicht (CSV)")
+        en("Import: ${bank.displayName} Depotauszug (PDF) or Depotübersicht (CSV)")
+        de("Import: ${bank.displayName} Depotauszug (PDF) oder Depotübersicht (CSV)")
     }
 }
 

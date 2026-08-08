@@ -364,8 +364,9 @@ internal fun MainScreen(
         AddAccountDialog(
             profiles = profiles,
             onDismiss = { showAddAccount = false },
-            onAdd = { name, type, institution, iban, ownerIds ->
-                repo.addAccount(name, type, institution.ifBlank { null }, iban.ifBlank { null }, ownerProfileIds = ownerIds)
+            onAdd = { name, bank, type, iban, ownerIds ->
+                // The bank is stored by its enum name so imports can be routed back to its templates.
+                repo.addAccount(name, type, bank.name, iban.ifBlank { null }, ownerProfileIds = ownerIds)
                 refresh++; showAddAccount = false
             },
         )

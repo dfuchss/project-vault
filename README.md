@@ -90,7 +90,9 @@ its expected min/max), and a warning appears if the balance could dip below zero
 
 ## Supported banks & account types
 
-Imports are routed by account type, so a statement can only be filed into a compatible account.
+The bank decides how a statement is parsed, so an account is created for a **bank + account type**
+picked from this table — never a hand-typed bank. Imports are then routed by both, so a statement can
+only be filed into a compatible account.
 
 | Account type | Bank | PDF | CSV |
 |---|---|:--:|:--:|

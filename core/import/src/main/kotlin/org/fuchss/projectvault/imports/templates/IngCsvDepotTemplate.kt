@@ -5,6 +5,7 @@ import org.fuchss.projectvault.imports.ParsedDepotStatement
 import org.fuchss.projectvault.imports.csv.CsvDepotTemplate
 import org.fuchss.projectvault.imports.csv.CsvDocument
 import org.fuchss.projectvault.imports.parse.GermanFormats
+import org.fuchss.projectvault.model.Bank
 
 /**
  * ING "Depotübersicht" CSV export (latin-1). A holdings snapshot, not transactions.
@@ -16,6 +17,7 @@ import org.fuchss.projectvault.imports.parse.GermanFormats
  */
 class IngCsvDepotTemplate : CsvDepotTemplate {
     override val id = "ing-csv-depot"
+    override val bank = Bank.ING
 
     private val isin = Regex("""^[A-Z]{2}[A-Z0-9]{9}[0-9]$""")
 

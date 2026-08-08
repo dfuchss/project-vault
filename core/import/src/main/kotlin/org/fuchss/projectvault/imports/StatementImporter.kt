@@ -9,6 +9,7 @@ import org.fuchss.projectvault.imports.templates.DkbCreditCardTemplate
 import org.fuchss.projectvault.imports.templates.DkbCsvCreditCardTemplate
 import org.fuchss.projectvault.imports.templates.DkbCsvGiroTemplate
 import org.fuchss.projectvault.imports.templates.DkbGiroTemplate
+import org.fuchss.projectvault.model.Bank
 import java.io.File
 
 /**
@@ -23,21 +24,28 @@ class StatementImporter(
     private val csvTemplates: List<CsvStatementTemplate> = defaultCsvTemplates(),
 ) {
     /**
-     * Imports [file], accepting only statements whose kind is in [accepts] (default: any). The caller
-     * passes the kinds the target account can hold, so a document of the wrong kind (a card statement
-     * into a Girokonto) is rejected with a [WrongStatementTypeException] instead of being mis-filed.
+     * Imports [file], accepting only statements whose kind is in [accepts] and whose bank is in
+     * [banks] (defaults: any). The caller passes what the target account can hold, so a document of
+     * the wrong kind (a card statement into a Girokonto) or from the wrong bank is rejected with a
+     * [WrongStatementTypeException] / [WrongBankException] instead of being mis-filed.
      */
-    fun import(file: File, accepts: Set<StatementKind> = StatementKind.entries.toSet()): ImportResult =
-        if (file.extension.equals("csv", ignoreCase = true)) importCsv(CsvFormat.read(file), file.name, accepts)
-        else importDocument(PdfTextExtractor.extract(file), file.name, accepts)
+    fun import(
+        file: File,
+        accepts: Set<StatementKind> = StatementKind.entries.toSet(),
+        banks: Set<Bank> = Bank.entries.toSet(),
+    ): ImportResult =
+        if (file.extension.equals("csv", ignoreCase = true)) importCsv(CsvFormat.read(file), file.name, accepts, banks)
+        else importDocument(PdfTextExtractor.extract(file), file.name, accepts, banks)
 
     /** Testable core: takes an already-extracted document (so parsing can be tested without a PDF). */
     fun importDocument(
         doc: PdfDocument,
         sourceName: String = "<document>",
         accepts: Set<StatementKind> = StatementKind.entries.toSet(),
+        banks: Set<Bank> = Bank.entries.toSet(),
     ): ImportResult {
         val matched = templates.firstOrNull { it.matches(doc) } ?: throw UnsupportedStatementException(sourceName)
+        if (matched.bank !in banks) throw WrongBankException(sourceName, matched.bank, banks)
         if (matched.kind !in accepts) throw WrongStatementTypeException(sourceName, matched.kind, accepts)
         val statement = matched.parse(doc)
         return ImportResult(statement, BalanceValidator.check(statement))
@@ -48,8 +56,10 @@ class StatementImporter(
         doc: CsvDocument,
         sourceName: String = "<csv>",
         accepts: Set<StatementKind> = StatementKind.entries.toSet(),
+        banks: Set<Bank> = Bank.entries.toSet(),
     ): ImportResult {
         val matched = csvTemplates.firstOrNull { it.matches(doc) } ?: throw UnsupportedStatementException(sourceName)
+        if (matched.bank !in banks) throw WrongBankException(sourceName, matched.bank, banks)
         if (matched.kind !in accepts) throw WrongStatementTypeException(sourceName, matched.kind, accepts)
         val statement = matched.parse(doc)
         return ImportResult(statement, BalanceValidator.check(statement))

@@ -140,7 +140,7 @@ internal fun AccountDetail(
                     Text(if (account.type == AccountType.DEPOT) strings.portfolioValueLabel else strings.balanceLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(balance?.let(::formatCents) ?: "—", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 }
-                if (ImportSupport.isSupported(account.type)) {
+                if (ImportSupport.isSupported(account)) {
                     Button(onClick = onImport) { Text(strings.importStatementButton) }
                 }
                 if (batches.isNotEmpty()) {

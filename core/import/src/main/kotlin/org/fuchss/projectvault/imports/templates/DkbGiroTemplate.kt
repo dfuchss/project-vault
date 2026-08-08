@@ -7,6 +7,7 @@ import org.fuchss.projectvault.imports.StatementTemplate
 import org.fuchss.projectvault.imports.parse.GermanFormats
 import org.fuchss.projectvault.imports.pdf.PdfDocument
 import org.fuchss.projectvault.imports.pdf.PdfLine
+import org.fuchss.projectvault.model.Bank
 import java.time.LocalDate
 import kotlin.math.abs
 
@@ -25,6 +26,7 @@ import kotlin.math.abs
  */
 class DkbGiroTemplate : StatementTemplate {
     override val id = "dkb-giro"
+    override val bank = Bank.DKB
     override val kind = StatementKind.GIRO
 
     private val datePrefix = Regex("""^(\d{2}\.\d{2}\.\d{4})(.*)$""")

@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import org.fuchss.projectvault.data.db.Category
 import org.fuchss.projectvault.data.db.Profile
 import org.fuchss.projectvault.model.AccountType
+import org.fuchss.projectvault.model.Bank
 import org.fuchss.projectvault.model.CategoryKind
 
 @Composable
@@ -502,16 +503,24 @@ private fun StatusPill(text: String) {
     }
 }
 
+/**
+ * Creating an account is a **restricted** choice, not free text: the bank decides how its statements
+ * parse, so the user picks a bank and then one of the products that bank has a parser for
+ * ([ImportSupport.accountTypes]). That guarantees every account created here can actually import.
+ */
 @Composable
 internal fun AddAccountDialog(
     profiles: List<Profile>,
     onDismiss: () -> Unit,
-    onAdd: (String, AccountType, String, String, List<String>) -> Unit,
+    onAdd: (String, Bank, AccountType, String, List<String>) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
-    var type by remember { mutableStateOf(AccountType.GIRO) }
-    var institution by remember { mutableStateOf(ImportSupport.defaultBank(AccountType.GIRO)) }
+    var bank by remember { mutableStateOf(ImportSupport.banks.first()) }
+    // Types are bank-dependent; switching bank snaps the type to one that bank actually supports.
+    val types = ImportSupport.accountTypes(bank)
+    var type by remember { mutableStateOf(types.first()) }
     var iban by remember { mutableStateOf("") }
+    var bankMenu by remember { mutableStateOf(false) }
     var typeMenu by remember { mutableStateOf(false) }
     val ownerIds = remember { mutableStateListOf<String>() }
     val strings = LocalStrings.current
@@ -522,29 +531,36 @@ internal fun AddAccountDialog(
             Column {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.name) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
-                Box {
-                    OutlinedButton(onClick = { typeMenu = true }) { Text(strings.typeButton(accountTypeLabel(type))) }
-                    RoundedDropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
-                        AccountType.entries.forEach { t ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(accountTypeLabel(t) + if (ImportSupport.isSupported(t)) "" else strings.noImportSuffix)
-                                },
-                                onClick = {
-                                    // Pre-fill the bank when the field is empty or still the previous type's default.
-                                    if (institution.isBlank() || institution == ImportSupport.defaultBank(type)) {
-                                        institution = ImportSupport.defaultBank(t)
-                                    }
-                                    type = t; typeMenu = false
-                                },
-                            )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box {
+                        OutlinedButton(onClick = { bankMenu = true }) { Text(strings.bankButton(bank.displayName)) }
+                        RoundedDropdownMenu(expanded = bankMenu, onDismissRequest = { bankMenu = false }) {
+                            ImportSupport.banks.forEach { b ->
+                                DropdownMenuItem(
+                                    text = { Text(b.displayName) },
+                                    onClick = {
+                                        bank = b
+                                        if (type !in ImportSupport.accountTypes(b)) type = ImportSupport.accountTypes(b).first()
+                                        bankMenu = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    Box {
+                        OutlinedButton(onClick = { typeMenu = true }) { Text(strings.typeButton(accountTypeLabel(type))) }
+                        RoundedDropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
+                            types.forEach { t ->
+                                DropdownMenuItem(
+                                    text = { Text(accountTypeLabel(t)) },
+                                    onClick = { type = t; typeMenu = false },
+                                )
+                            }
                         }
                     }
                 }
                 Spacer(Modifier.height(4.dp))
-                Text(strings.importHint(type), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(value = institution, onValueChange = { institution = it }, label = { Text(strings.bankOptional) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text(strings.importHint(bank, type), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(value = iban, onValueChange = { iban = it }, label = { Text(strings.ibanOptional) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (profiles.isNotEmpty()) {
@@ -563,7 +579,7 @@ internal fun AddAccountDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { if (name.isNotBlank()) onAdd(name.trim(), type, institution, iban, ownerIds.toList()) }) { Text(strings.add) } },
+        confirmButton = { TextButton(onClick = { if (name.isNotBlank()) onAdd(name.trim(), bank, type, iban, ownerIds.toList()) }) { Text(strings.add) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )
 }

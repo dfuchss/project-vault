@@ -7,6 +7,7 @@ import org.fuchss.projectvault.imports.csv.CsvDocument
 import org.fuchss.projectvault.imports.csv.CsvStatementTemplate
 import org.fuchss.projectvault.imports.csv.balanceToCents
 import org.fuchss.projectvault.imports.parse.GermanFormats
+import org.fuchss.projectvault.model.Bank
 
 /**
  * DKB "Umsatzliste" CSV export for a Girokonto / Tagesgeld / Festgeld account.
@@ -22,6 +23,7 @@ import org.fuchss.projectvault.imports.parse.GermanFormats
  */
 class DkbCsvGiroTemplate : CsvStatementTemplate {
     override val id = "dkb-csv-giro"
+    override val bank = Bank.DKB
     override val kind = StatementKind.GIRO
 
     private val accountTypes = setOf("Girokonto", "Tagesgeld", "Festgeld", "Geldmarktkonto")
