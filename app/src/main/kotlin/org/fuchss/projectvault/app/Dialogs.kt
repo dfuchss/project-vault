@@ -24,7 +24,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -215,7 +214,7 @@ internal fun AddCategoryDialog(
                 Spacer(Modifier.height(10.dp))
                 Box {
                     OutlinedButton(onClick = { kindMenu = true }, enabled = allowedKinds.size > 1) { Text("Kind: ${kind.name}") }
-                    DropdownMenu(expanded = kindMenu, onDismissRequest = { kindMenu = false }) {
+                    RoundedDropdownMenu(expanded = kindMenu, onDismissRequest = { kindMenu = false }) {
                         allowedKinds.forEach { k ->
                             DropdownMenuItem(text = { Text(k.name) }, onClick = { kind = k; kindMenu = false })
                         }
@@ -525,7 +524,7 @@ internal fun AddAccountDialog(
                 Spacer(Modifier.height(10.dp))
                 Box {
                     OutlinedButton(onClick = { typeMenu = true }) { Text("Type: ${accountTypeLabel(type)}") }
-                    DropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
+                    RoundedDropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
                         AccountType.entries.forEach { t ->
                             DropdownMenuItem(
                                 text = {

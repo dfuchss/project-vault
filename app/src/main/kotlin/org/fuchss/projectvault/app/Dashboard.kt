@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -143,7 +142,7 @@ internal fun DashboardScreen(
                 var menu by remember { mutableStateOf(false) }
                 Box {
                     OutlinedButton(onClick = { menu = true }) { Text(periodLabel) }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    RoundedDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(text = { Text("All time") }, onClick = { selectedMonth = null; menu = false })
                         months.forEach { m ->
                             DropdownMenuItem(text = { Text(formatYearMonth(m)) }, onClick = { selectedMonth = m; menu = false })
@@ -515,7 +514,7 @@ private fun RecurringSeriesDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Box {
                         OutlinedButton(onClick = { cadenceMenu = true }) { Text(cadence.name.lowercase().replaceFirstChar { it.uppercase() }) }
-                        DropdownMenu(expanded = cadenceMenu, onDismissRequest = { cadenceMenu = false }) {
+                        RoundedDropdownMenu(expanded = cadenceMenu, onDismissRequest = { cadenceMenu = false }) {
                             Cadence.entries.forEach { c ->
                                 DropdownMenuItem(text = { Text(c.name.lowercase().replaceFirstChar { it.uppercase() }) }, onClick = { cadence = c; cadenceMenu = false })
                             }
@@ -532,7 +531,7 @@ private fun RecurringSeriesDialog(
                     OutlinedButton(onClick = { categoryMenu = true }) {
                         Text("Category: " + (allowedCats.firstOrNull { it.id == categoryId }?.name ?: "None"))
                     }
-                    DropdownMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
+                    RoundedDropdownMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
                         DropdownMenuItem(text = { Text("None") }, onClick = { categoryId = null; categoryMenu = false })
                         allowedCats.forEach { c ->
                             DropdownMenuItem(text = { Text(c.name) }, onClick = { categoryId = c.id; categoryMenu = false })

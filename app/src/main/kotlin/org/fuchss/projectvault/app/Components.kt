@@ -4,16 +4,19 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,6 +41,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.fuchss.projectvault.model.AccountType
 import org.fuchss.projectvault.model.CategoryKind
@@ -238,6 +242,28 @@ internal fun Badge(text: String) {
 @Composable
 internal fun Dot(color: Color) {
     Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+}
+
+/**
+ * App-wide dropdown menu: rounded to match the rest of the UI (Material's default is nearly
+ * rectangular) and height-capped so long lists (e.g. all categories) stay compact and scroll instead
+ * of running the full window height.
+ */
+@Composable
+internal fun RoundedDropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    maxHeight: Dp = 320.dp,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = modifier.heightIn(max = maxHeight),
+        shape = RoundedCornerShape(12.dp),
+        content = content,
+    )
 }
 
 /** The "Project Vault" wordmark: teal "Project", orange "Vault" — theme-aware, readable light/dark. */

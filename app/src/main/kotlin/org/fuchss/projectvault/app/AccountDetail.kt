@@ -1,6 +1,7 @@
 package org.fuchss.projectvault.app
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,18 +15,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,7 +38,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -139,7 +146,9 @@ internal fun AccountDetail(
                         (search.isBlank() || (t.counterparty ?: "").contains(search, true) || t.purpose.contains(search, true)) &&
                             when (filter) {
                                 "ALL" -> true
-                                "NONE" -> t.categoryId == null
+                                // Uncategorized and To-review are disjoint: a txn with a pending
+                                // suggestion belongs to "To review", not "Uncategorized".
+                                "NONE" -> t.categoryId == null && t.suggestedCategoryId == null
                                 "REVIEW" -> t.categoryId == null && t.suggestedCategoryId != null
                                 else -> t.categoryId == filter
                             }
@@ -258,38 +267,117 @@ private fun TransactionFilters(
     categories: List<Category>,
     categoryById: Map<String, Category>,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
-            value = search,
-            onValueChange = onSearch,
-            placeholder = { Text("Search counterparty or purpose") },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-        )
-        var menu by remember { mutableStateOf(false) }
-        Box {
-            OutlinedButton(onClick = { menu = true }) { Text("Filter: ${filterLabel(filter, categoryById)}") }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("All") }, onClick = { onFilter("ALL"); menu = false })
-                DropdownMenuItem(text = { Text("Uncategorized") }, onClick = { onFilter("NONE"); menu = false })
-                DropdownMenuItem(text = { Text("To review (suggested)") }, onClick = { onFilter("REVIEW"); menu = false })
-                HorizontalDivider()
-                categories.forEach { c ->
-                    DropdownMenuItem(
-                        text = { Row(verticalAlignment = Alignment.CenterVertically) { Dot(parseHexColor(c.color)); Spacer(Modifier.width(6.dp)); Text(c.name) } },
-                        onClick = { onFilter(c.id); menu = false },
-                    )
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SearchField(value = search, onValueChange = onSearch, modifier = Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            FilterPill("All", selected = filter == "ALL") { onFilter("ALL") }
+            FilterPill("Uncategorized", selected = filter == "NONE") { onFilter("NONE") }
+            FilterPill("To review", selected = filter == "REVIEW") { onFilter("REVIEW") }
+
+            // A specific category filter lives in a dropdown chip that shows the active category.
+            val activeCategory = categoryById[filter]
+            var menu by remember { mutableStateOf(false) }
+            Box {
+                FilterPill(
+                    label = activeCategory?.name ?: "Category",
+                    selected = activeCategory != null,
+                    leadingDot = activeCategory?.let { parseHexColor(it.color) },
+                    trailingArrow = true,
+                ) { menu = true }
+                RoundedDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    categories.forEach { c ->
+                        DropdownMenuItem(
+                            text = { Row(verticalAlignment = Alignment.CenterVertically) { Dot(parseHexColor(c.color)); Spacer(Modifier.width(6.dp)); Text(c.name) } },
+                            onClick = { onFilter(c.id); menu = false },
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-private fun filterLabel(filter: String, categoryById: Map<String, Category>): String = when (filter) {
-    "ALL" -> "All"
-    "NONE" -> "Uncategorized"
-    "REVIEW" -> "To review"
-    else -> categoryById[filter]?.name ?: "Category"
+/** A compact, pill-shaped search field with a drawn magnifier and an inline clear button. */
+@Composable
+private fun SearchField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier,
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp).height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            MagnifierIcon(muted)
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) {
+                    Text("Search counterparty or purpose", style = MaterialTheme.typography.bodyMedium, color = muted)
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (value.isNotEmpty()) {
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier.size(22.dp).clip(CircleShape).clickable { onValueChange("") },
+                    contentAlignment = Alignment.Center,
+                ) { Text("✕", style = MaterialTheme.typography.labelMedium, color = muted) }
+            }
+        }
+    }
+}
+
+/** A magnifier glass drawn with primitives (no icon dependency). */
+@Composable
+private fun MagnifierIcon(color: Color) {
+    Canvas(Modifier.size(16.dp)) {
+        val stroke = 1.6.dp.toPx()
+        val r = size.minDimension * 0.30f
+        val c = Offset(size.width * 0.40f, size.height * 0.40f)
+        drawCircle(color = color, radius = r, center = c, style = Stroke(width = stroke))
+        drawLine(
+            color = color,
+            start = Offset(c.x + r * 0.72f, c.y + r * 0.72f),
+            end = Offset(size.width * 0.92f, size.height * 0.92f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+/** A selectable filter chip (optionally with a leading colour dot and a dropdown arrow). */
+@Composable
+private fun FilterPill(
+    label: String,
+    selected: Boolean,
+    leadingDot: Color? = null,
+    trailingArrow: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val fg = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = if (selected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (leadingDot != null) Dot(leadingDot)
+            Text(label, style = MaterialTheme.typography.labelLarge, color = fg)
+            if (trailingArrow) Text("▾", style = MaterialTheme.typography.labelMedium, color = fg)
+        }
+    }
 }
 
 @Composable
@@ -325,7 +413,7 @@ private fun TxnInspector(
                         Text("Uncategorized")
                     }
                 }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                RoundedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     // Only offer categories whose kind fits the amount's sign (income/transfer for a
                     // credit, expense/transfer for a debit) — so a debit can't be marked as salary, etc.
                     categories.filter { categoryAllowedForAmount(txn.amountCents, it.kind) }.forEach { c ->
@@ -433,7 +521,7 @@ private fun DepotPane(account: Account, repo: VaultRepository, refreshKey: Int) 
                 OutlinedButton(onClick = { expanded = true }) {
                     Text("Snapshot: ${selectedDay?.let(::formatEpochDay) ?: "—"}")
                 }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                RoundedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     dates.forEach { day ->
                         DropdownMenuItem(text = { Text(formatEpochDay(day)) }, onClick = { selectedDay = day; expanded = false })
                     }
