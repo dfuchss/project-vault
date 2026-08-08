@@ -31,14 +31,20 @@ compose.desktop {
     application {
         mainClass = "org.fuchss.projectvault.app.MainKt"
 
+        // Keep slf4j-simple quiet: only surface PDFBox WARN+ (its INFO chatter is noise).
+        jvmArgs += "-Dorg.slf4j.simpleLogger.defaultLogLevel=warn"
+
         // Name the macOS app menu / dock as "Project Vault" (not the main-class "MainKt") for both
-        // `:app:run` and the packaged launcher.
-        jvmArgs += listOf(
-            "-Dapple.awt.application.name=Project Vault",
-            "-Xdock:name=Project Vault",
-            // Keep slf4j-simple quiet: only surface PDFBox WARN+ (its INFO chatter is noise).
-            "-Dorg.slf4j.simpleLogger.defaultLogLevel=warn",
-        )
+        // `:app:run` and the packaged launcher — but ONLY on macOS. `-Xdock:name` is a mac-only JVM
+        // option; baking it into the Windows/Linux launchers makes the JVM abort at startup with
+        // "Unrecognized option", which on Windows' GUI launcher shows up as the app silently never
+        // starting. Each OS is packaged on its own runner, so gate these on the build host.
+        if (System.getProperty("os.name").startsWith("Mac", ignoreCase = true)) {
+            jvmArgs += listOf(
+                "-Dapple.awt.application.name=Project Vault",
+                "-Xdock:name=Project Vault",
+            )
+        }
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
