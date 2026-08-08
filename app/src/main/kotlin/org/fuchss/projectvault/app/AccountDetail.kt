@@ -1,9 +1,11 @@
 package org.fuchss.projectvault.app
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,9 +25,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -48,6 +47,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.time.LocalDate
+import java.time.YearMonth
 import org.fuchss.projectvault.data.VaultRepository
 import org.fuchss.projectvault.data.db.Account
 import org.fuchss.projectvault.data.db.Category
@@ -56,8 +57,6 @@ import org.fuchss.projectvault.data.db.ImportBatch
 import org.fuchss.projectvault.data.db.Profile
 import org.fuchss.projectvault.data.db.Txn
 import org.fuchss.projectvault.model.AccountType
-import java.time.LocalDate
-import java.time.YearMonth
 
 // ---------------------------------------------------------------- Account detail
 
@@ -98,7 +97,7 @@ internal fun AccountDetail(
 
     Column(Modifier.fillMaxSize()) {
         // header bar
-        Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+        VaultCard(modifier = Modifier.fillMaxWidth()) {
             Row(
                 Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -141,7 +140,7 @@ internal fun AccountDetail(
                     Text(balance?.let(::formatCents) ?: "—", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 }
                 if (ImportSupport.isSupported(account)) {
-                    Button(onClick = onImport) { Text(strings.importStatementButton) }
+                    PrimaryButton(strings.importStatementButton, onClick = onImport)
                 }
                 if (batches.isNotEmpty()) {
                     TextButton(onClick = { showImportHistory = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
@@ -236,10 +235,22 @@ internal fun AccountDetail(
 @Composable
 private fun TxnRow(txn: Txn, category: Category?, suggested: Category?, selected: Boolean, onClick: () -> Unit) {
     val strings = LocalStrings.current
+    // The row a pointer is over lights up, so a long list stays easy to track across its full width.
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val container by animateColorAsState(
+        when {
+            selected -> MaterialTheme.colorScheme.primaryContainer
+            hovered -> MaterialTheme.colorScheme.surfaceContainerHigh
+            else -> Color.Transparent
+        },
+        label = "txn-row",
+    )
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(8.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        shape = RoundedCornerShape(10.dp),
+        color = container,
+        interactionSource = interaction,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -309,16 +320,19 @@ private fun TransactionFilters(
             val activeCategory = categoryById[filter]
             var menu by remember { mutableStateOf(false) }
             Box {
-                FilterPill(
+                SelectPill(
                     label = activeCategory?.name ?: strings.filterCategory,
-                    selected = activeCategory != null,
+                    expanded = menu,
+                    active = activeCategory != null,
                     leadingDot = activeCategory?.let { parseHexColor(it.color) },
-                    trailingArrow = true,
-                ) { menu = true }
-                RoundedDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    onClick = { menu = true },
+                )
+                VaultMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     categories.forEach { c ->
-                        DropdownMenuItem(
-                            text = { Row(verticalAlignment = Alignment.CenterVertically) { Dot(parseHexColor(c.color)); Spacer(Modifier.width(6.dp)); Text(c.name) } },
+                        VaultMenuItem(
+                            label = c.name,
+                            selected = c.id == filter,
+                            leadingDot = parseHexColor(c.color),
                             onClick = { onFilter(c.id); menu = false },
                         )
                     }
@@ -329,15 +343,16 @@ private fun TransactionFilters(
             if (months.size > 1) {
                 var periodMenu by remember { mutableStateOf(false) }
                 Box {
-                    FilterPill(
+                    SelectPill(
                         label = period?.let(::formatYearMonth) ?: strings.filterAnyTime,
-                        selected = period != null,
-                        trailingArrow = true,
-                    ) { periodMenu = true }
-                    RoundedDropdownMenu(expanded = periodMenu, onDismissRequest = { periodMenu = false }) {
-                        DropdownMenuItem(text = { Text(strings.filterAnyTime) }, onClick = { onPeriod(null); periodMenu = false })
+                        expanded = periodMenu,
+                        active = period != null,
+                        onClick = { periodMenu = true },
+                    )
+                    VaultMenu(expanded = periodMenu, onDismissRequest = { periodMenu = false }) {
+                        VaultMenuItem(strings.filterAnyTime, selected = period == null, onClick = { onPeriod(null); periodMenu = false })
                         months.forEach { m ->
-                            DropdownMenuItem(text = { Text(formatYearMonth(m)) }, onClick = { onPeriod(m); periodMenu = false })
+                            VaultMenuItem(formatYearMonth(m), selected = period == m, onClick = { onPeriod(m); periodMenu = false })
                         }
                     }
                 }
@@ -408,24 +423,38 @@ private fun FilterPill(
     label: String,
     selected: Boolean,
     leadingDot: Color? = null,
-    trailingArrow: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val fg = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    val scheme = MaterialTheme.colorScheme
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val container by animateColorAsState(
+        when {
+            selected -> scheme.primaryContainer
+            hovered -> scheme.surfaceContainerHighest
+            else -> scheme.surfaceContainerHigh
+        },
+        label = "filter-pill",
+    )
     Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = if (selected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
-        modifier = Modifier.clickable(onClick = onClick),
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = container,
+        border = BorderStroke(1.dp, if (selected) scheme.primary.copy(alpha = 0.55f) else hairline()),
+        interactionSource = interaction,
     ) {
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (leadingDot != null) Dot(leadingDot)
-            Text(label, style = MaterialTheme.typography.labelLarge, color = fg)
-            if (trailingArrow) Text("▾", style = MaterialTheme.typography.labelMedium, color = fg)
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (selected) scheme.onPrimaryContainer else scheme.onSurface,
+            )
         }
     }
 }
@@ -443,8 +472,8 @@ private fun TxnInspector(
     onManageCategories: () -> Unit,
 ) {
     val strings = LocalStrings.current
-    Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
+    VaultCard(modifier = Modifier.fillMaxWidth(), corner = 16.dp, padding = PaddingValues(16.dp)) {
+        Column {
             Text(strings.transaction, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(10.dp))
             InfoRow(strings.amount, formatCents(txn.amountCents))
@@ -457,27 +486,26 @@ private fun TxnInspector(
             Spacer(Modifier.height(4.dp))
             var expanded by remember { mutableStateOf(false) }
             Box {
-                OutlinedButton(onClick = { expanded = true }) {
-                    if (current != null) {
-                        Dot(parseHexColor(current.color)); Spacer(Modifier.width(6.dp)); Text(current.name)
-                    } else {
-                        Text(strings.uncategorized)
-                    }
-                }
-                RoundedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                SelectPill(
+                    label = current?.name ?: strings.uncategorized,
+                    expanded = expanded,
+                    active = current != null,
+                    leadingDot = current?.let { parseHexColor(it.color) },
+                    onClick = { expanded = true },
+                )
+                VaultMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     // Only offer categories whose kind fits the amount's sign (income/transfer for a
                     // credit, expense/transfer for a debit) — so a debit can't be marked as salary, etc.
                     categories.filter { categoryAllowedForAmount(txn.amountCents, it.kind) }.forEach { c ->
-                        DropdownMenuItem(
-                            text = { Row(verticalAlignment = Alignment.CenterVertically) { Dot(parseHexColor(c.color)); Spacer(Modifier.width(6.dp)); Text(c.name) } },
+                        VaultMenuItem(
+                            label = c.name,
+                            selected = c.id == current?.id,
+                            leadingDot = parseHexColor(c.color),
                             onClick = { expanded = false; onSetCategory(c.id) },
                         )
                     }
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text(strings.manageCategoriesMenu) },
-                        onClick = { expanded = false; onManageCategories() },
-                    )
+                    VaultMenuDivider()
+                    VaultMenuItem(strings.manageCategoriesMenu, emphasis = true, onClick = { expanded = false; onManageCategories() })
                 }
             }
 
@@ -573,12 +601,15 @@ private fun DepotPane(account: Account, repo: VaultRepository, refreshKey: Int) 
         if (dates.isNotEmpty()) {
             var expanded by remember { mutableStateOf(false) }
             Box {
-                OutlinedButton(onClick = { expanded = true }) {
-                    Text(strings.snapshotLabel(selectedDay?.let(::formatEpochDay) ?: "—"))
-                }
-                RoundedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                SelectPill(
+                    prefix = strings.snapshotPrefix,
+                    label = selectedDay?.let(::formatEpochDay) ?: "—",
+                    expanded = expanded,
+                    onClick = { expanded = true },
+                )
+                VaultMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     dates.forEach { day ->
-                        DropdownMenuItem(text = { Text(formatEpochDay(day)) }, onClick = { selectedDay = day; expanded = false })
+                        VaultMenuItem(formatEpochDay(day), selected = day == selectedDay, onClick = { selectedDay = day; expanded = false })
                     }
                 }
             }

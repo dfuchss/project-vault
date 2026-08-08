@@ -24,10 +24,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -41,7 +39,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -215,10 +212,15 @@ internal fun AddCategoryDialog(
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.name) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
                 Box {
-                    OutlinedButton(onClick = { kindMenu = true }, enabled = allowedKinds.size > 1) { Text(strings.kindButton(strings.kindLabel(kind))) }
-                    RoundedDropdownMenu(expanded = kindMenu, onDismissRequest = { kindMenu = false }) {
+                    SelectPill(
+                        prefix = strings.kindPrefix,
+                        label = strings.kindLabel(kind),
+                        expanded = kindMenu,
+                        onClick = { if (allowedKinds.size > 1) kindMenu = true },
+                    )
+                    VaultMenu(expanded = kindMenu, onDismissRequest = { kindMenu = false }) {
                         allowedKinds.forEach { k ->
-                            DropdownMenuItem(text = { Text(strings.kindLabel(k)) }, onClick = { kind = k; kindMenu = false })
+                            VaultMenuItem(strings.kindLabel(k), selected = k == kind, onClick = { kind = k; kindMenu = false })
                         }
                     }
                 }
@@ -533,11 +535,17 @@ internal fun AddAccountDialog(
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box {
-                        OutlinedButton(onClick = { bankMenu = true }) { Text(strings.bankButton(bank.displayName)) }
-                        RoundedDropdownMenu(expanded = bankMenu, onDismissRequest = { bankMenu = false }) {
+                        SelectPill(
+                            prefix = strings.bankPrefix,
+                            label = bank.displayName,
+                            expanded = bankMenu,
+                            onClick = { bankMenu = true },
+                        )
+                        VaultMenu(expanded = bankMenu, onDismissRequest = { bankMenu = false }) {
                             ImportSupport.banks.forEach { b ->
-                                DropdownMenuItem(
-                                    text = { Text(b.displayName) },
+                                VaultMenuItem(
+                                    label = b.displayName,
+                                    selected = b == bank,
                                     onClick = {
                                         bank = b
                                         if (type !in ImportSupport.accountTypes(b)) type = ImportSupport.accountTypes(b).first()
@@ -548,13 +556,15 @@ internal fun AddAccountDialog(
                         }
                     }
                     Box {
-                        OutlinedButton(onClick = { typeMenu = true }) { Text(strings.typeButton(accountTypeLabel(type))) }
-                        RoundedDropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
+                        SelectPill(
+                            prefix = strings.typePrefix,
+                            label = accountTypeLabel(type),
+                            expanded = typeMenu,
+                            onClick = { typeMenu = true },
+                        )
+                        VaultMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
                             types.forEach { t ->
-                                DropdownMenuItem(
-                                    text = { Text(accountTypeLabel(t)) },
-                                    onClick = { type = t; typeMenu = false },
-                                )
+                                VaultMenuItem(accountTypeLabel(t), selected = t == type, onClick = { type = t; typeMenu = false })
                             }
                         }
                     }

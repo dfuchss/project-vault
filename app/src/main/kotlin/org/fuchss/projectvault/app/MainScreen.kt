@@ -2,11 +2,13 @@
 
 package org.fuchss.projectvault.app
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,8 +28,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -117,11 +117,14 @@ internal fun MainScreen(
     }
     val selected = accounts.firstOrNull { it.id == selectedAccountId }
 
-    Box(Modifier.fillMaxSize()) {
+    // The whole window sits on a softly graded backdrop; panels lift off it with their own fills.
+    Box(Modifier.fillMaxSize().background(appBackgroundBrush())) {
       Column(Modifier.fillMaxSize()) {
-        // top bar
+        // top bar — a translucent band so the backdrop's glow shows through behind the wordmark
         Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 20.dp, vertical = 14.dp),
+            Modifier.fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+                .padding(horizontal = 20.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Image(rememberClasspathPainter("branding/app-icon.png"), contentDescription = null, modifier = Modifier.size(30.dp).clip(RoundedCornerShape(7.dp)))
@@ -136,7 +139,7 @@ internal fun MainScreen(
             Spacer(Modifier.width(4.dp))
             IconAction(onClick = onClose) { LogoutGlyph(it) }
         }
-        HorizontalDivider()
+        HorizontalDivider(color = hairline())
 
         Row(Modifier.fillMaxSize()) {
             Sidebar(
@@ -158,7 +161,7 @@ internal fun MainScreen(
                 onDismissProfilesHint = { profilesHintVisible = false; prefs.setBool(AppPrefs.HINT_PROFILES_DISMISSED, true) },
                 onDismissAccountsHint = { accountsHintVisible = false; prefs.setBool(AppPrefs.HINT_ACCOUNTS_DISMISSED, true) },
             )
-            VerticalDivider()
+            VerticalDivider(color = hairline())
             Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
               Box(Modifier.widthIn(max = 1200.dp).fillMaxWidth().fillMaxHeight().padding(20.dp)) {
                 if (showDashboard) {
@@ -238,8 +241,8 @@ internal fun MainScreen(
                   .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
               contentAlignment = Alignment.Center,
           ) {
-              Card(shape = RoundedCornerShape(16.dp)) {
-                  Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
+              VaultCard(padding = PaddingValues(24.dp)) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
                       CircularProgressIndicator(Modifier.size(26.dp), strokeWidth = 3.dp)
                       Spacer(Modifier.width(16.dp))
                       Text(busyMessage, style = MaterialTheme.typography.bodyMedium)
@@ -412,7 +415,14 @@ private fun Sidebar(
     onDismissAccountsHint: () -> Unit,
 ) {
     val strings = LocalStrings.current
-    Column(Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(16.dp)) {
+    // A faint translucent panel: enough to separate the sidebar from the content area without a
+    // hard-edged second background competing with the window's gradient.
+    Column(
+        Modifier.width(300.dp).fillMaxHeight()
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.45f))
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
         NavItem(strings.overview, selected = dashboardSelected, onClick = onOverview, icon = { OverviewGlyph(it) })
         Spacer(Modifier.height(16.dp))
         SectionHeader(strings.profiles, onAdd = onAddProfile, onManage = if (profiles.isNotEmpty()) onManageProfiles else null)
@@ -490,10 +500,8 @@ private fun EmptyCallout(title: String, body: String, action: String?, onAction:
             }
             Text(body, Modifier.padding(end = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (action != null) {
-                Spacer(Modifier.height(8.dp))
-                Button(onClick = onAction, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)) {
-                    Text(action, style = MaterialTheme.typography.labelLarge)
-                }
+                Spacer(Modifier.height(10.dp))
+                PrimaryButton(action, onClick = onAction)
             }
         }
     }
@@ -501,12 +509,25 @@ private fun EmptyCallout(title: String, body: String, action: String?, onAction:
 
 @Composable
 private fun AccountCard(account: Account, owners: List<Profile>, balance: Long?, selected: Boolean, onClick: () -> Unit) {
-    val border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    // Hovering lifts the card (border brightens) so the sidebar feels responsive; the selected card
+    // keeps a primary-tinted fill and a heavier border.
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val borderColor by animateColorAsState(
+        when {
+            selected -> MaterialTheme.colorScheme.primary
+            hovered -> MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)
+            else -> hairline()
+        },
+        label = "account-border",
+    )
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-        border = border,
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f) else MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(if (selected) 1.5.dp else 1.dp, borderColor),
+        shadowElevation = if (selected || hovered) 4.dp else 0.dp,
+        interactionSource = interaction,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(12.dp)) {

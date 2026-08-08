@@ -1,19 +1,18 @@
 package org.fuchss.projectvault.app
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,14 +50,22 @@ internal fun StatCard(label: String, value: String, modifier: Modifier = Modifie
     // An "estimated" card (e.g. expected income) is visually set apart: a tinted container, a primary
     // outline, an "≈ EST" tag and a "≈" prefix on the value, so the number never reads as an actual.
     val accent = MaterialTheme.colorScheme.primary
-    Card(
-        shape = RoundedCornerShape(14.dp),
+    VaultCard(
         modifier = modifier,
-        border = if (estimated) BorderStroke(1.dp, accent.copy(alpha = 0.5f)) else null,
-        colors = if (estimated) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)) else CardDefaults.cardColors(),
+        corner = 16.dp,
+        padding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        accent = if (estimated) accent else null,
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+        Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // A thin colour rule ties the number to its meaning (green income, red expense) even
+                // before the eye reaches the value itself.
+                Box(
+                    Modifier.size(width = 3.dp, height = 11.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(if (valueColor == Color.Unspecified) accent else valueColor),
+                )
+                Spacer(Modifier.width(7.dp))
                 Text(
                     label.uppercase(),
                     style = MaterialTheme.typography.labelSmall,
@@ -82,7 +89,7 @@ internal fun StatCard(label: String, value: String, modifier: Modifier = Modifie
             Spacer(Modifier.height(8.dp))
             Text(
                 if (estimated) "≈ $value" else value,
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = valueColor,
                 maxLines = 1,
@@ -171,7 +178,9 @@ internal fun TrendChart(
     val tooltipBg = MaterialTheme.colorScheme.inverseSurface
     val tooltipFg = MaterialTheme.colorScheme.inverseOnSurface
     val guideColor = MaterialTheme.colorScheme.outline
-    val bandColor = MaterialTheme.colorScheme.onSurfaceVariant
+    // Tint the uncertainty ribbon with the app's accent rather than plain grey — it reads as part of
+    // the projection instead of a shadow behind it.
+    val bandColor = MaterialTheme.colorScheme.primary
     val positive = MoneyPositive
     val negative = MoneyNegative
     val strings = LocalStrings.current
@@ -213,7 +222,15 @@ internal fun TrendChart(
                 for (i in bandLo.indices.reversed()) lineTo(i * stepX, y(bandLo[i]))
                 close()
             }
-            drawPath(ribbon, bandColor.copy(alpha = 0.18f))
+            // Fades out towards the far edge of the horizon, where the projection is least certain.
+            drawPath(
+                ribbon,
+                Brush.horizontalGradient(
+                    listOf(bandColor.copy(alpha = 0.30f), bandColor.copy(alpha = 0.10f)),
+                    startX = 0f,
+                    endX = size.width,
+                ),
+            )
         }
 
         val line = Path().apply {

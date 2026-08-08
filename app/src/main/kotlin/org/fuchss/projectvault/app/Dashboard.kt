@@ -5,13 +5,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,10 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -38,6 +35,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.time.LocalDate
+import java.time.YearMonth
+import kotlin.math.roundToLong
 import org.fuchss.projectvault.analytics.Analytics
 import org.fuchss.projectvault.analytics.AnalyticsTxn
 import org.fuchss.projectvault.analytics.Cadence
@@ -47,9 +47,6 @@ import org.fuchss.projectvault.data.ManualRecurring
 import org.fuchss.projectvault.data.VaultRepository
 import org.fuchss.projectvault.data.db.Account
 import org.fuchss.projectvault.data.db.Category
-import java.time.LocalDate
-import java.time.YearMonth
-import kotlin.math.roundToLong
 
 // ---------------------------------------------------------------- Dashboard
 
@@ -155,11 +152,11 @@ internal fun DashboardScreen(
             if (months.isNotEmpty()) {
                 var menu by remember { mutableStateOf(false) }
                 Box {
-                    OutlinedButton(onClick = { menu = true }) { Text(periodLabel) }
-                    RoundedDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text(strings.allTime) }, onClick = { selectedMonth = null; menu = false })
+                    SelectPill(label = periodLabel, expanded = menu, active = selectedMonth != null, onClick = { menu = true })
+                    VaultMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        VaultMenuItem(strings.allTime, selected = selectedMonth == null, onClick = { selectedMonth = null; menu = false })
                         months.forEach { m ->
-                            DropdownMenuItem(text = { Text(formatYearMonth(m)) }, onClick = { selectedMonth = m; menu = false })
+                            VaultMenuItem(formatYearMonth(m), selected = selectedMonth == m, onClick = { selectedMonth = m; menu = false })
                         }
                     }
                 }
@@ -177,8 +174,8 @@ internal fun DashboardScreen(
         }
 
         Spacer(Modifier.height(16.dp))
-        Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(20.dp)) {
+        VaultCard(modifier = Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
+            Column {
                 Text(strings.spendingByCategory(periodLabel), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
                 if (byCategory.isEmpty()) {
@@ -217,8 +214,8 @@ internal fun DashboardScreen(
         }
 
         Spacer(Modifier.height(16.dp))
-        Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(20.dp)) {
+        VaultCard(modifier = Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
+            Column {
                 Text(strings.monthlyCashFlow, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
                 if (monthly.isEmpty()) {
@@ -259,8 +256,8 @@ internal fun DashboardScreen(
             }
         }
         Spacer(Modifier.height(16.dp))
-        Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(20.dp)) {
+        VaultCard(modifier = Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
+            Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(strings.recurring, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     if (recurring.isNotEmpty()) {
@@ -311,8 +308,8 @@ internal fun DashboardScreen(
         }
 
         Spacer(Modifier.height(16.dp))
-        Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(20.dp)) {
+        VaultCard(modifier = Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
+            Column {
                 Text(strings.forecastTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -596,10 +593,10 @@ private fun RecurringSeriesDialog(
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Box {
-                        OutlinedButton(onClick = { cadenceMenu = true }) { Text(strings.cadenceLabel(cadence)) }
-                        RoundedDropdownMenu(expanded = cadenceMenu, onDismissRequest = { cadenceMenu = false }) {
+                        SelectPill(label = strings.cadenceLabel(cadence), expanded = cadenceMenu, onClick = { cadenceMenu = true })
+                        VaultMenu(expanded = cadenceMenu, onDismissRequest = { cadenceMenu = false }) {
                             Cadence.entries.forEach { c ->
-                                DropdownMenuItem(text = { Text(strings.cadenceLabel(c)) }, onClick = { cadence = c; cadenceMenu = false })
+                                VaultMenuItem(strings.cadenceLabel(c), selected = c == cadence, onClick = { cadence = c; cadenceMenu = false })
                             }
                         }
                     }
@@ -611,13 +608,23 @@ private fun RecurringSeriesDialog(
                 }
                 Spacer(Modifier.height(10.dp))
                 Box {
-                    OutlinedButton(onClick = { categoryMenu = true }) {
-                        Text(strings.categoryButton(allowedCats.firstOrNull { it.id == categoryId }?.name ?: strings.none))
-                    }
-                    RoundedDropdownMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
-                        DropdownMenuItem(text = { Text(strings.none) }, onClick = { categoryId = null; categoryMenu = false })
+                    val chosen = allowedCats.firstOrNull { it.id == categoryId }
+                    SelectPill(
+                        prefix = strings.categoryPrefix,
+                        label = chosen?.name ?: strings.none,
+                        leadingDot = chosen?.let { parseHexColor(it.color) },
+                        expanded = categoryMenu,
+                        onClick = { categoryMenu = true },
+                    )
+                    VaultMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
+                        VaultMenuItem(strings.none, selected = categoryId == null, onClick = { categoryId = null; categoryMenu = false })
                         allowedCats.forEach { c ->
-                            DropdownMenuItem(text = { Text(c.name) }, onClick = { categoryId = c.id; categoryMenu = false })
+                            VaultMenuItem(
+                                label = c.name,
+                                selected = c.id == categoryId,
+                                leadingDot = parseHexColor(c.color),
+                                onClick = { categoryId = c.id; categoryMenu = false },
+                            )
                         }
                     }
                 }

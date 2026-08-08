@@ -1,28 +1,30 @@
 package org.fuchss.projectvault.app
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,12 +44,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import org.fuchss.projectvault.model.AccountType
-import org.fuchss.projectvault.model.CategoryKind
 import kotlin.math.cos
 import kotlin.math.sin
+import org.fuchss.projectvault.model.AccountType
+import org.fuchss.projectvault.model.CategoryKind
 
 /**
  * Which category kinds a transaction may take, by sign: a **positive** amount can only be income
@@ -80,15 +81,32 @@ internal fun SectionHeader(title: String, onAdd: () -> Unit, onManage: (() -> Un
 
 @Composable
 internal fun NavItem(label: String, selected: Boolean, onClick: () -> Unit, icon: (@Composable (Color) -> Unit)? = null) {
-    val content = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    // Selected: the accent sweep with a soft coloured glow beneath it, so the current view is
+    // unmistakable at a glance. Unselected: transparent, warming on hover.
+    val scheme = MaterialTheme.colorScheme
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val content = if (selected) OnAccent else scheme.onSurface
+    val shape = RoundedCornerShape(12.dp)
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        shape = shape,
+        color = Color.Transparent,
+        shadowElevation = if (selected) 6.dp else 0.dp,
+        interactionSource = interaction,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier
+                .clip(shape)
+                .then(
+                    when {
+                        selected -> Modifier.background(accentBrush())
+                        hovered -> Modifier.background(scheme.surfaceContainerHigh)
+                        else -> Modifier
+                    }
+                )
+                .padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) { icon(content); Spacer(Modifier.width(10.dp)) }
@@ -262,52 +280,59 @@ internal fun OverviewGlyph(color: Color) {
     }
 }
 
+/** A toggle chip (profile filters). Same pill language as [SelectPill], without the chevron. */
 @Composable
 internal fun Chip(label: String, selected: Boolean, dot: Color? = null, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val container by animateColorAsState(
+        when {
+            selected -> scheme.primaryContainer
+            hovered -> scheme.surfaceContainerHighest
+            else -> scheme.surfaceContainerHigh
+        },
+        label = "chip",
+    )
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        color = container,
+        border = BorderStroke(1.dp, if (selected) scheme.primary.copy(alpha = 0.55f) else hairline()),
+        interactionSource = interaction,
     ) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = 13.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             if (dot != null) { Dot(dot); Spacer(Modifier.width(6.dp)) }
-            Text(label, style = MaterialTheme.typography.labelLarge)
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (selected) scheme.onPrimaryContainer else scheme.onSurface,
+            )
         }
     }
 }
 
+/** A small static tag (account type, status). Tinted rather than grey so it reads as a label, not a button. */
 @Composable
 internal fun Badge(text: String) {
-    Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Text(text, Modifier.padding(horizontal = 8.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Surface(
+        shape = RoundedCornerShape(7.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = if (isDarkTheme()) 0.16f else 0.10f),
+    ) {
+        Text(
+            text,
+            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary,
+        )
     }
 }
 
 @Composable
 internal fun Dot(color: Color) {
     Box(Modifier.size(10.dp).clip(CircleShape).background(color))
-}
-
-/**
- * App-wide dropdown menu: rounded to match the rest of the UI (Material's default is nearly
- * rectangular) and height-capped so long lists (e.g. all categories) stay compact and scroll instead
- * of running the full window height.
- */
-@Composable
-internal fun RoundedDropdownMenu(
-    expanded: Boolean,
-    onDismissRequest: () -> Unit,
-    modifier: Modifier = Modifier,
-    maxHeight: Dp = 320.dp,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismissRequest,
-        modifier = modifier.heightIn(max = maxHeight),
-        shape = RoundedCornerShape(12.dp),
-        content = content,
-    )
 }
 
 /** The "Project Vault" wordmark: teal "Project", orange "Vault" — theme-aware, readable light/dark. */

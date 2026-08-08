@@ -78,7 +78,7 @@ val Strings.addRecurringSeriesTitle get() = translate { en("Add recurring series
 val Strings.editRecurringSeriesTitle get() = translate { en("Edit recurring series"); de("Wiederkehrende Serie bearbeiten") }
 val Strings.amountFromTransaction get() = translate { en("Amount (from the selected transaction)"); de("Betrag (aus dem ausgewählten Umsatz)") }
 val Strings.nextDateLabel get() = translate { en("Next date (YYYY-MM-DD)"); de("Nächstes Datum (JJJJ-MM-TT)") }
-fun Strings.categoryButton(name: String) = translate { en("Category: $name"); de("Kategorie: $name") }
+val Strings.categoryPrefix get() = translate { en("Category"); de("Kategorie") }
 fun Strings.cadenceLabel(cadence: Cadence) = when (cadence) {
     Cadence.MONTHLY -> translate { en("Monthly"); de("Monatlich") }
     Cadence.QUARTERLY -> translate { en("Quarterly"); de("Vierteljährlich") }

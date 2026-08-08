@@ -15,10 +15,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import org.fuchss.projectvault.data.VaultManager
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
+import org.fuchss.projectvault.data.VaultManager
 
 fun main() {
     // Name the macOS application menu / dock "Project Vault" (not the main-class "MainKt"). Must be set

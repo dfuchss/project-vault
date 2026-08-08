@@ -32,7 +32,8 @@ val Strings.tickOwners get() = translate {
 val Strings.newCategoryTitle get() = translate { en("New category"); de("Neue Kategorie") }
 val Strings.editCategoryTitle get() = translate { en("Edit category"); de("Kategorie bearbeiten") }
 val Strings.newCategoryButton get() = translate { en("＋  New category"); de("＋  Neue Kategorie") }
-fun Strings.kindButton(kindLabel: String) = translate { en("Kind: $kindLabel"); de("Art: $kindLabel") }
+/** Prefixes label a select pill's *field*; the pill renders the value itself, dimmed prefix first. */
+val Strings.kindPrefix get() = translate { en("Kind"); de("Art") }
 val Strings.keywordsOptional get() = translate { en("Keywords (optional)"); de("Schlüsselwörter (optional)") }
 val Strings.keywords get() = translate { en("Keywords"); de("Schlüsselwörter") }
 val Strings.keywordsAddHelp get() = translate {
@@ -80,8 +81,8 @@ val Strings.statusBuiltIn get() = translate { en("Built-in"); de("Vorgegeben") }
 
 // -- Add account -------------------------------------------------------------
 val Strings.addAccountTitle get() = translate { en("Add account"); de("Konto hinzufügen") }
-fun Strings.typeButton(typeLabel: String) = translate { en("Type: $typeLabel"); de("Typ: $typeLabel") }
-fun Strings.bankButton(bankLabel: String) = translate { en("Bank: $bankLabel"); de("Bank: $bankLabel") }
+val Strings.typePrefix get() = translate { en("Type"); de("Typ") }
+val Strings.bankPrefix get() = translate { en("Bank"); de("Bank") }
 val Strings.ibanOptional get() = translate { en("IBAN (optional)"); de("IBAN (optional)") }
 val Strings.ownersJoint get() = translate { en("Owners (joint = several)"); de("Inhaber (gemeinsam = mehrere)") }
 

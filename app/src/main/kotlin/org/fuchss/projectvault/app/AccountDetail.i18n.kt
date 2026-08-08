@@ -53,5 +53,5 @@ fun Strings.importHistorySubtitle(items: Int, whenText: String, reconciled: Bool
 
 // depot
 val Strings.holdings get() = translate { en("Holdings"); de("Bestände") }
-fun Strings.snapshotLabel(dateOrDash: String) = translate { en("Snapshot: $dateOrDash"); de("Stand: $dateOrDash") }
+val Strings.snapshotPrefix get() = translate { en("Snapshot"); de("Stand") }
 val Strings.noHoldingsImport get() = translate { en("No holdings yet. Import a Depotauszug."); de("Noch keine Bestände. Importiere einen Depotauszug.") }
