@@ -60,6 +60,7 @@ import org.fuchss.projectvault.data.db.Category
 import org.fuchss.projectvault.data.db.ImportBatch
 import org.fuchss.projectvault.data.db.Profile
 import org.fuchss.projectvault.data.db.Txn
+import org.fuchss.projectvault.quotes.BoerseFrankfurtQuoteProvider
 
 /** A pending "apply to similar transactions?" confirmation before a bulk reclassification. */
 private data class PendingReclassify(val txn: Txn, val categoryId: String, val otherCount: Int)
@@ -81,6 +82,8 @@ internal fun MainScreen(
     val repo = remember(vault) { VaultRepository(vault) }
     val importService = remember(repo) { ImportService(repo) }
     val categorizer = remember(repo) { Categorizer(repo, DjlEmbedder()) }
+    // Constructed eagerly, but inert until an account opts in — see QuoteRefreshService.refresh.
+    val quoteRefresh = remember(repo) { QuoteRefreshService(repo, BoerseFrankfurtQuoteProvider()) }
     remember(repo) { categorizer.ensureSeeded() } // install seed categories/rules on first open
     var refresh by remember { mutableStateOf(0) }
 
@@ -103,10 +106,30 @@ internal fun MainScreen(
     var pendingReclassify by remember { mutableStateOf<PendingReclassify?>(null) }
     var pendingDeleteBatch by remember { mutableStateOf<ImportBatch?>(null) }
     var pendingDeleteAccount by remember { mutableStateOf<Account?>(null) }
+    var pendingEnableQuotes by remember { mutableStateOf<Account?>(null) }
     var previews by remember { mutableStateOf<List<ImportPreview>>(emptyList()) }
     var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf<String?>(null) } // non-null = a long task is running
     val scope = rememberCoroutineScope()
+
+    // Live securities prices. Reached only from the Depot pane's refresh button — there is no
+    // automatic or background fetch — and kept off the UI thread since it does one HTTP call per
+    // position. A failed lookup changes nothing; it just reports back in the status line.
+    fun refreshQuotes(accountId: String) {
+        busy = strings.fetchingQuotes
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { quoteRefresh.refresh(accountId) }
+            status = when (result) {
+                is QuoteRefreshService.Result.Refreshed ->
+                    strings.quotesRefreshed(result.repriced, result.carried, formatCents(result.totalCents))
+                QuoteRefreshService.Result.NoStatement -> strings.quotesNoStatement
+                QuoteRefreshService.Result.StatementToday -> strings.quotesStatementToday
+                QuoteRefreshService.Result.NoQuotes, QuoteRefreshService.Result.Unavailable -> strings.quotesUnavailable
+            }
+            refresh++
+            busy = null
+        }
+    }
 
     // `prefs` (passed in) persists onboarding-hint dismissals + theme/last-vault across restarts.
     var profilesHintVisible by remember { mutableStateOf(!prefs.getBool(AppPrefs.HINT_PROFILES_DISMISSED, false)) }
@@ -214,6 +237,9 @@ internal fun MainScreen(
                         },
                         onDismissSuggestion = { txn -> categorizer.dismissSuggestion(txn); refresh++ },
                         onDeleteBatch = { batch -> pendingDeleteBatch = batch },
+                        // Live prices only ever run from this button — never on open, never on a timer.
+                        onRefreshQuotes = { refreshQuotes(selected.id) },
+                        onEnableQuotes = { pendingEnableQuotes = selected },
                         onDeleteAccount = { pendingDeleteAccount = selected },
                         onEditOwners = { editOwnersAccount = selected },
                         onManageCategories = { showManageCategories = true },
@@ -295,6 +321,24 @@ internal fun MainScreen(
                 }) { Text(strings.delete) }
             },
             dismissButton = { TextButton(onClick = { pendingDeleteAccount = null }) { Text(strings.cancel) } },
+        )
+    }
+    val enableQuotesFor = pendingEnableQuotes
+    if (enableQuotesFor != null) {
+        // The one-time consent step: nothing has touched the network before this is confirmed.
+        AlertDialog(
+            onDismissRequest = { pendingEnableQuotes = null },
+            title = { Text(strings.enableLiveQuotesTitle) },
+            text = { Text(strings.enableLiveQuotesBody) },
+            confirmButton = {
+                TextButton(onClick = {
+                    repo.setLiveQuotesEnabled(enableQuotesFor.id, true)
+                    pendingEnableQuotes = null
+                    refresh++
+                    refreshQuotes(enableQuotesFor.id)
+                }) { Text(strings.enableLiveQuotesConfirm) }
+            },
+            dismissButton = { TextButton(onClick = { pendingEnableQuotes = null }) { Text(strings.cancel) } },
         )
     }
     val deleteBatch = pendingDeleteBatch

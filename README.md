@@ -9,7 +9,14 @@
 Import your own bank statements, get on-device categorization, spending analysis and
 cash-flow forecasts — with **no bank connection** and all your data in a single portable file.
 
-Think *Finanzguru*, but nothing ever leaves your machine.
+Think *Finanzguru*, but your data stays on your machine.
+
+<p align="center">
+  <a href="https://fuchss.org/projects/project-vault/"><b>Website</b></a> ·
+  <a href="#features">Features</a> ·
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#privacy">Privacy</a>
+</p>
 
 ![Project Vault dashboard](docs/screenshots/dashboard.png)
 
@@ -57,6 +64,14 @@ Think *Finanzguru*, but nothing ever leaves your machine.
 - **Profiles & accounts** — multiple household profiles with a filtering sidebar, a **Manage
   profiles** dialog (rename / delete), and inline **owner editing** to assign an account to one or
   more profiles (joint = several).
+- **Live securities prices (opt-in)** — for Depot accounts, look up current prices by **ISIN** at
+  Börse Frankfurt / Xetra and revalue each position (`quantity × price`), so the portfolio can be
+  valued *now* instead of only as of the last Depotauszug. Off by default, enabled per account behind
+  a consent dialog, and fetched **only when you press refresh** — there is no background, automatic
+  or scheduled update. Each refresh is stored as its own dated snapshot you can delete again; your
+  imported statement is never modified. Positions that can't be priced safely — percent-quoted bonds,
+  non-EUR holdings, anything without an ISIN — keep their statement value rather than being guessed
+  at. See [Privacy](#privacy) for exactly what leaves the machine.
 - **Dashboard** — net worth, monthly income/expense, spending by category, monthly cash flow, with a
   month selector.
 - **Recurring detection & forecasting** — finds salary/rent/subscriptions and projects the next
@@ -79,6 +94,8 @@ panel where any statement can be undone. Every transaction traces back to its so
 ![Transactions view](docs/screenshots/transactions.png)
 
 **Depot** — dated holdings snapshots with market values, ISIN/WKN, and the same provenance trail.
+Quantity, price and value line up as a proper grid; with live prices enabled, each repriced position
+also shows the time of the quote it was valued at.
 
 ![Depot view](docs/screenshots/depot.png)
 
@@ -134,9 +151,11 @@ module boundaries so a mobile companion stays possible later.
 | `:core:import` | PDFBox text extraction + a semicolon/latin-1-aware CSV reader, per-bank templates (DKB giro/Tagesgeld/credit-card, ING Depot in both PDF and CSV), balance/depot validators, cross-source de-dup. |
 | `:core:classification` | Rules engine, seed catalog, and the bundled-embeddings classifier (DJL + ONNX Runtime). |
 | `:core:analytics` | Income/expense, spending-by-category, monthly cash flow, recurring detection and forecasts. |
+| `:core:quotes` | The **only networked module** — current securities prices by ISIN from Börse Frankfurt/Xetra over the JDK HTTP client, behind a provider interface that degrades to "unavailable" instead of throwing. Plus the pure `quantity × price` repricing math. |
 
 **Toolchain:** Kotlin 2.1.20 · Compose Multiplatform 1.8.0 · Gradle 8.13 (wrapper) · JDK 21
-(`jvmToolchain(21)`) · SQLDelight 2.0.2 · Apache PDFBox 3.0.4 · DJL + ONNX Runtime.
+(`jvmToolchain(21)`) · SQLDelight 2.0.2 · Apache PDFBox 3.0.4 · DJL + ONNX Runtime ·
+kotlinx-serialization-json (quote parsing only).
 
 More detail: [`docs/CLASSIFICATION.md`](docs/CLASSIFICATION.md) for the classification &
 re-classification strategy, and [`docs/FORECASTING.md`](docs/FORECASTING.md) for recurring detection
@@ -157,13 +176,33 @@ Not built yet, but planned:
   remainder that rules and embeddings don't place confidently. The app is fully functional without it,
   and it would talk only to `localhost`.
 - More bank PDF/CSV templates and an interactive template editor.
+- **Cost basis and gains** for Depot positions — the ING Depotauszug carries an *Einstandskurs* that
+  isn't imported yet; with it, live prices could show absolute and percentage return, not just a
+  current value.
+- **Live prices for non-EUR positions**, which currently keep their statement value because the quote
+  source carries no currency and converting on a guess would be worse than not converting.
 
 ## Privacy
 
-Project Vault makes **no network calls** to import or categorize your data — the embedding model is
-bundled and runs on the CPU, and there is no bank connection, sync or cloud. Your vault file is yours
-— back it up, move it, delete it. (The planned Ollama tier above would run locally, talking only to
-`localhost`.)
+Project Vault makes **no network calls** to import, categorize or analyze your data — the embedding
+model is bundled and runs on the CPU, and there is no bank connection, sync or cloud. Your vault file
+is yours — back it up, move it, delete it. There is no telemetry, no analytics and no account.
+
+**One feature is an exception, and it is opt-in.** Live securities prices are off by default and
+enabled per Depot account behind a consent dialog that states exactly what happens. Once enabled, and
+only when you press refresh:
+
+- **What is sent:** the **ISIN** of each holding — a public identifier for the security itself, to
+  `api.boerse-frankfurt.de`. One request per position. (This does tell that venue *which* securities
+  you hold, though not how many or what they're worth — which is why it's a choice, not a default.)
+- **What is never sent:** amounts, quantities, security names, balances, account names, IBANs,
+  profiles, or anything else from your vault.
+- **When:** only on your click. There is no background, automatic, scheduled or on-open fetch.
+- **No account or API key** is involved, and an account that hasn't opted in never reaches the
+  network at all.
+
+Turn it off and the app is fully offline again. (The planned Ollama tier above would run locally,
+talking only to `localhost`.)
 
 ## Credits & licensing
 

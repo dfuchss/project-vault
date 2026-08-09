@@ -100,6 +100,9 @@ object VaultManager {
             0,
         )
         addColumnIfMissing(driver, table = "category", column = "enabled", ddl = "INTEGER NOT NULL DEFAULT 1")
+        // Live securities prices: the per-account opt-in, and the quote time behind a repriced holding.
+        addColumnIfMissing(driver, table = "account", column = "liveQuotes", ddl = "INTEGER NOT NULL DEFAULT 0")
+        addColumnIfMissing(driver, table = "holding", column = "quoteAt", ddl = "INTEGER")
     }
 
     /**

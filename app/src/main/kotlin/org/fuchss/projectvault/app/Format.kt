@@ -11,6 +11,7 @@ import java.util.Locale
 private val EURO: NumberFormat = NumberFormat.getCurrencyInstance(Locale.GERMANY)
 private val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 private val DATETIME: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+private val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 /** Formats integer cents as a German-locale currency string, e.g. -2995 → "-29,95 €". */
 fun formatCents(cents: Long): String = EURO.format(cents / 100.0)
@@ -27,6 +28,15 @@ fun formatEpochDayOrDash(epochDay: Long?): String = epochDay?.let(::formatEpochD
 /** Formats epoch milliseconds as a local date-time. */
 fun formatEpochMillis(millis: Long): String =
     Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(DATETIME)
+
+/**
+ * Formats epoch milliseconds as a local time of day (`HH:mm`), or as a date when it is not today —
+ * used for "as of" labels on live prices, where the time matters but the date usually does not.
+ */
+fun formatQuoteTime(millis: Long, today: LocalDate = LocalDate.now()): String {
+    val moment = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
+    return if (moment.toLocalDate() == today) moment.format(TIME) else moment.format(DATETIME)
+}
 
 /** Formats a year-month with the active language's month names, e.g. "August 2026" / "Dezember 2026". */
 fun formatYearMonth(ym: YearMonth): String =

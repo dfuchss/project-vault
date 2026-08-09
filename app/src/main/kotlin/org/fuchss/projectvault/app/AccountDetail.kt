@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
@@ -75,6 +76,8 @@ internal fun AccountDetail(
     onAcceptSuggestion: (Txn, String) -> Unit,
     onDismissSuggestion: (Txn) -> Unit,
     onDeleteBatch: (ImportBatch) -> Unit,
+    onRefreshQuotes: () -> Unit,
+    onEnableQuotes: () -> Unit,
     onDeleteAccount: () -> Unit,
     onEditOwners: () -> Unit,
     onManageCategories: () -> Unit,
@@ -158,7 +161,7 @@ internal fun AccountDetail(
         Row(Modifier.weight(1f).fillMaxWidth()) {
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 if (account.type == AccountType.DEPOT) {
-                    DepotPane(account, repo, refreshKey)
+                    DepotPane(account, repo, refreshKey, onRefreshQuotes, onEnableQuotes)
                 } else {
                     val filtered = txns.filter { t ->
                         (period == null || YearMonth.from(LocalDate.ofEpochDay(t.bookingDate)) == period) &&
@@ -585,17 +588,35 @@ private fun ImportHistoryDialog(batches: List<ImportBatch>, onDeleteBatch: (Impo
 
 // ---------------------------------------------------------------- Depot pane
 
+// Column widths shared by the holdings header and every row, so quantity, price and value line up as
+// a real grid instead of drifting with each row's content. The end padding matches the rows' so the
+// pane total sits exactly above the value column.
+private val QuantityColumn = 96.dp
+private val PriceColumn = 116.dp
+private val ValueColumn = 132.dp
+private val GridPadding = 10.dp
+
 @Composable
-private fun DepotPane(account: Account, repo: VaultRepository, refreshKey: Int) {
+private fun DepotPane(
+    account: Account,
+    repo: VaultRepository,
+    refreshKey: Int,
+    onRefreshQuotes: () -> Unit,
+    onEnableQuotes: () -> Unit,
+) {
     val dates = remember(account.id, refreshKey) { repo.valuationDates(account.id) }
     var selectedDay by remember(account.id, refreshKey) { mutableStateOf(dates.firstOrNull()) }
+    val liveDays = remember(account.id, refreshKey) { repo.liveValuationDates(account.id) }
     val holdings = remember(account.id, selectedDay, refreshKey) {
         selectedDay?.let { repo.holdingsForValuationDate(account.id, it) } ?: emptyList()
     }
     val total = holdings.sumOf { it.marketValueCents }
     val strings = LocalStrings.current
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    fun snapshotLabel(day: Long) =
+        if (day in liveDays) strings.liveSnapshotLabel(formatEpochDay(day)) else formatEpochDay(day)
+
+    Row(Modifier.fillMaxWidth().padding(end = GridPadding), verticalAlignment = Alignment.CenterVertically) {
         Text(strings.holdings, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.width(12.dp))
         if (dates.isNotEmpty()) {
@@ -603,35 +624,104 @@ private fun DepotPane(account: Account, repo: VaultRepository, refreshKey: Int) 
             Box {
                 SelectPill(
                     prefix = strings.snapshotPrefix,
-                    label = selectedDay?.let(::formatEpochDay) ?: "—",
+                    label = selectedDay?.let(::snapshotLabel) ?: "—",
                     expanded = expanded,
                     onClick = { expanded = true },
                 )
                 VaultMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     dates.forEach { day ->
-                        VaultMenuItem(formatEpochDay(day), selected = day == selectedDay, onClick = { selectedDay = day; expanded = false })
+                        VaultMenuItem(snapshotLabel(day), selected = day == selectedDay, onClick = { selectedDay = day; expanded = false })
                     }
                 }
+            }
+        }
+        // Live prices are strictly manual: this button is the only thing that ever fetches.
+        if (dates.isNotEmpty()) {
+            val enabled = account.liveQuotes == 1L
+            IconAction(onClick = if (enabled) onRefreshQuotes else onEnableQuotes) { color ->
+                RefreshGlyph(if (enabled) MaterialTheme.colorScheme.primary else color)
             }
         }
         Spacer(Modifier.weight(1f))
         if (holdings.isNotEmpty()) Text(formatCents(total), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     }
-    Spacer(Modifier.height(8.dp))
-    if (holdings.isEmpty()) EmptyHint(strings.noHoldingsImport)
-    else LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        items(holdings) { HoldingRow(it) }
+    Spacer(Modifier.height(10.dp))
+    if (holdings.isEmpty()) {
+        EmptyHint(strings.noHoldingsImport)
+    } else {
+        HoldingsHeader()
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            items(holdings) { HoldingRow(it) }
+        }
     }
+}
+
+/** Column labels for the holdings grid, on the same widths as [HoldingRow]. */
+@Composable
+private fun HoldingsHeader() {
+    val strings = LocalStrings.current
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = GridPadding, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(strings.securityColumn, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = muted)
+        Text(strings.quantityColumn, Modifier.width(QuantityColumn), style = MaterialTheme.typography.labelSmall, color = muted, textAlign = TextAlign.End)
+        Text(strings.priceColumn, Modifier.width(PriceColumn), style = MaterialTheme.typography.labelSmall, color = muted, textAlign = TextAlign.End)
+        Text(strings.valueColumn, Modifier.width(ValueColumn), style = MaterialTheme.typography.labelSmall, color = muted, textAlign = TextAlign.End)
+    }
+    HorizontalDivider(color = hairline())
+    Spacer(Modifier.height(2.dp))
 }
 
 @Composable
 private fun HoldingRow(holding: Holding) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = GridPadding, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(holding.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(holding.isin, holding.wkn).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                listOfNotNull(holding.isin, holding.wkn).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
-        Text(holding.quantity, Modifier.width(90.dp), style = MaterialTheme.typography.bodySmall)
-        Text(formatCents(holding.marketValueCents), fontWeight = FontWeight.Medium)
+        // Numbers are right-aligned so decimal places line up down the column.
+        Text(
+            holding.quantity,
+            Modifier.width(QuantityColumn),
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+        )
+        Column(Modifier.width(PriceColumn), horizontalAlignment = Alignment.End) {
+            Text(
+                holding.priceText ?: "—",
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.End,
+                maxLines = 1,
+            )
+            // Only rows that actually got a live price carry a quote time; statement rows stay plain.
+            holding.quoteAt?.let {
+                Text(
+                    formatQuoteTime(it),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.End,
+                    maxLines = 1,
+                )
+            }
+        }
+        Text(
+            formatCents(holding.marketValueCents),
+            Modifier.width(ValueColumn),
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+        )
     }
 }

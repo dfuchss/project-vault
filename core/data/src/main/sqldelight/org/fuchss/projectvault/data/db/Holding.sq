@@ -14,6 +14,7 @@ CREATE TABLE holding (
     marketValueCents INTEGER NOT NULL,
     currency TEXT NOT NULL DEFAULT 'EUR',
     valuationDate INTEGER,
+    quoteAt INTEGER,                 -- epoch millis of the live quote behind this row; NULL = statement value
     FOREIGN KEY (accountId) REFERENCES account(id) ON DELETE CASCADE
 );
 
@@ -38,5 +39,21 @@ deleteHoldingsByAccount:
 DELETE FROM holding WHERE accountId = ?;
 
 insertHolding:
-INSERT INTO holding(id, accountId, importBatchId, isin, wkn, name, quantity, priceText, marketValueCents, currency, valuationDate)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO holding(id, accountId, importBatchId, isin, wkn, name, quantity, priceText, marketValueCents, currency, valuationDate, quoteAt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- Snapshot dates that came from an imported statement rather than a live price refresh. A live
+-- refresh reprices from the newest of these, so repeated refreshes always derive from the bank's
+-- numbers instead of from each other. Holdings with no batch (legacy rows) count as statement data.
+statementValuationDates:
+SELECT DISTINCT holding.valuationDate FROM holding
+LEFT JOIN importBatch ON importBatch.id = holding.importBatchId
+WHERE holding.accountId = ? AND holding.valuationDate IS NOT NULL
+  AND (importBatch.kind IS NULL OR importBatch.kind != 'LIVE')
+ORDER BY holding.valuationDate DESC;
+
+-- Snapshot dates produced by a live price refresh, so the UI can mark them in the snapshot picker.
+liveValuationDates:
+SELECT DISTINCT holding.valuationDate FROM holding
+JOIN importBatch ON importBatch.id = holding.importBatchId
+WHERE holding.accountId = ? AND holding.valuationDate IS NOT NULL AND importBatch.kind = 'LIVE';

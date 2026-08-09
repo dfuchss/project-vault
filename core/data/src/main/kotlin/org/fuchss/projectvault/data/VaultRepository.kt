@@ -34,11 +34,13 @@ data class NewHolding(
     val priceText: String?,
     val marketValueCents: Long,
     val currency: String,
+    /** Epoch millis of the live quote this value came from; `null` for a statement value. */
+    val quoteAt: Long? = null,
 )
 
 /** Provenance for one imported file: where entries came from and when. */
 data class NewImportBatch(
-    val kind: String,               // TRANSACTIONS | DEPOT
+    val kind: String,               // TRANSACTIONS | DEPOT | LIVE
     val sourceName: String,
     val institution: String?,
     val statementNumber: String?,
@@ -262,11 +264,26 @@ class VaultRepository(private val db: VaultDatabase) {
             holdings.forEach { h ->
                 db.holdingQueries.insertHolding(
                     newId(), accountId, batchId, h.isin, h.wkn, h.name, h.quantity, h.priceText,
-                    h.marketValueCents, h.currency, day,
+                    h.marketValueCents, h.currency, day, h.quoteAt,
                 )
             }
         }
     }
+
+    /**
+     * Snapshot dates that came from an imported statement, newest first — the base a live price
+     * refresh reprices from, and the set it must never overwrite.
+     */
+    fun statementValuationDates(accountId: String): List<Long> =
+        db.holdingQueries.statementValuationDates(accountId).executeAsList().filterNotNull()
+
+    /** Snapshot dates produced by a live price refresh rather than an import. */
+    fun liveValuationDates(accountId: String): Set<Long> =
+        db.holdingQueries.liveValuationDates(accountId).executeAsList().filterNotNull().toSet()
+
+    /** Turns live securities prices on or off for one account. Off by default; see `account.liveQuotes`. */
+    fun setLiveQuotesEnabled(accountId: String, enabled: Boolean) =
+        db.accountQueries.setLiveQuotes(if (enabled) 1L else 0L, accountId)
 
     // --- Recurring overrides (rename / hide a detected series, keyed by analytics merchant key) ---
     fun recurringOverrides(): Map<String, RecurringOverride> =

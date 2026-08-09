@@ -55,3 +55,43 @@ fun Strings.importHistorySubtitle(items: Int, whenText: String, reconciled: Bool
 val Strings.holdings get() = translate { en("Holdings"); de("Bestände") }
 val Strings.snapshotPrefix get() = translate { en("Snapshot"); de("Stand") }
 val Strings.noHoldingsImport get() = translate { en("No holdings yet. Import a Depotauszug."); de("Noch keine Bestände. Importiere einen Depotauszug.") }
+val Strings.securityColumn get() = translate { en("Security"); de("Wertpapier") }
+val Strings.quantityColumn get() = translate { en("Quantity"); de("Stück") }
+val Strings.priceColumn get() = translate { en("Price"); de("Kurs") }
+val Strings.valueColumn get() = translate { en("Value"); de("Wert") }
+
+// live prices (opt-in, manual refresh)
+fun Strings.liveSnapshotLabel(date: String) = translate { en("$date (live)"); de("$date (live)") }
+val Strings.enableLiveQuotesTitle get() = translate { en("Enable live prices?"); de("Live-Kurse aktivieren?") }
+val Strings.enableLiveQuotesBody get() = translate {
+    en(
+        "Project Vault will send the ISINs of this depot's holdings to Börse Frankfurt to look up current prices. " +
+            "Amounts, quantities, security names and account data never leave your device.\n\n" +
+            "Prices are only fetched when you press refresh — there is no background or automatic update. " +
+            "Each refresh is stored as its own dated snapshot that you can delete again at any time.",
+    )
+    de(
+        "Project Vault sendet die ISINs der Bestände dieses Depots an die Börse Frankfurt, um aktuelle Kurse abzurufen. " +
+            "Beträge, Stückzahlen, Wertpapiernamen und Kontodaten verlassen dein Gerät nicht.\n\n" +
+            "Kurse werden nur abgerufen, wenn du auf Aktualisieren drückst — es gibt keine automatische Aktualisierung im Hintergrund. " +
+            "Jede Aktualisierung wird als eigener, datierter Stand gespeichert, den du jederzeit wieder löschen kannst.",
+    )
+}
+val Strings.enableLiveQuotesConfirm get() = translate { en("Enable"); de("Aktivieren") }
+val Strings.fetchingQuotes get() = translate { en("Fetching current prices…"); de("Aktuelle Kurse werden abgerufen…") }
+fun Strings.quotesRefreshed(repriced: Int, carried: Int, total: String) = translate {
+    en("$repriced position(s) repriced" + (if (carried > 0) ", $carried kept from the statement" else "") + " · $total")
+    de("$repriced Position(en) neu bewertet" + (if (carried > 0) ", $carried aus dem Auszug übernommen" else "") + " · $total")
+}
+val Strings.quotesNoStatement get() = translate {
+    en("Import a Depotauszug first — live prices reprice the positions it lists.")
+    de("Importiere zuerst einen Depotauszug — Live-Kurse bewerten dessen Positionen neu.")
+}
+val Strings.quotesStatementToday get() = translate {
+    en("A statement is already dated today; it is kept rather than overwritten.")
+    de("Für heute liegt bereits ein Auszug vor; er wird nicht überschrieben.")
+}
+val Strings.quotesUnavailable get() = translate {
+    en("No prices available right now — nothing was changed.")
+    de("Derzeit keine Kurse verfügbar — es wurde nichts geändert.")
+}

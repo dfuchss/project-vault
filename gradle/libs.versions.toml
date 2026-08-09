@@ -5,6 +5,7 @@ sqldelight = "2.0.2"
 pdfbox = "3.0.4"
 djl = "0.30.0"
 slf4j = "2.0.16"
+serialization = "1.8.0"
 
 [libraries]
 djl-tokenizers = { module = "ai.djl.huggingface:tokenizers", version.ref = "djl" }
@@ -13,6 +14,9 @@ sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sq
 sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
 pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+# Runtime only — used via Json.parseToJsonElement for element access, so the
+# kotlin-serialization compiler plugin is deliberately not applied anywhere.
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
 
 [plugins]

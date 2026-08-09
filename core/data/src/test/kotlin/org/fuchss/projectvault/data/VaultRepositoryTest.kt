@@ -82,6 +82,99 @@ class VaultRepositoryTest {
     }
 
     @Test
+    fun `live price snapshots are distinguishable from imported ones`() {
+        val repo = repo()
+        val accountId = repo.addAccount("Depot", AccountType.DEPOT, institution = "ING")
+        val statementDay = LocalDate.of(2026, 7, 31)
+        val liveDay = LocalDate.of(2026, 8, 9)
+
+        val statement = repo.createBatch(accountId, NewImportBatch("DEPOT", "depot.pdf", "ING", null, null, null, statementDay, 126_000, true, 2))
+        repo.storeDepotSnapshot(accountId, statementDay, statement, listOf(
+            NewHolding("DE1", null, "ACME", "10", null, 63_000, "EUR"),
+            NewHolding("IE1", null, "ETF", "2.5", null, 63_000, "EUR"),
+        ))
+        val live = repo.createBatch(accountId, NewImportBatch("LIVE", "Börse Frankfurt", null, null, null, null, liveDay, 130_000, false, 2))
+        repo.storeDepotSnapshot(accountId, liveDay, live, listOf(
+            NewHolding("DE1", null, "ACME", "10", "6.50", 65_000, "EUR", quoteAt = 1_786_132_583_000L),
+            NewHolding("IE1", null, "ETF", "2.5", "260.00", 65_000, "EUR", quoteAt = 1_786_132_583_000L),
+        ))
+
+        // The live snapshot must never be mistaken for the bank's own numbers.
+        assertEquals(listOf(statementDay.toEpochDay()), repo.statementValuationDates(accountId))
+        assertEquals(setOf(liveDay.toEpochDay()), repo.liveValuationDates(accountId))
+        assertEquals(2, repo.valuationDates(accountId).size)
+
+        // quoteAt round-trips, marking which rows carry a live price.
+        val livePositions = repo.holdingsForValuationDate(accountId, liveDay.toEpochDay())
+        assertEquals(listOf(1_786_132_583_000L, 1_786_132_583_000L), livePositions.map { it.quoteAt })
+        assertNull(repo.holdingsForValuationDate(accountId, statementDay.toEpochDay()).first().quoteAt)
+
+        // Deleting the live batch reverts to the statement, including the displayed portfolio value.
+        assertEquals(130_000, repo.currentBalanceCents(accountId))
+        repo.deleteBatch(live)
+        assertEquals(126_000, repo.currentBalanceCents(accountId))
+        assertEquals(emptySet(), repo.liveValuationDates(accountId))
+        assertEquals(listOf(statementDay.toEpochDay()), repo.valuationDates(accountId))
+    }
+
+    @Test
+    fun `holdings with no batch count as statement data`() {
+        // Legacy rows predate import batches; they must still be usable as a repricing base.
+        val repo = repo()
+        val accountId = repo.addAccount("Depot", AccountType.DEPOT)
+        val day = LocalDate.of(2026, 5, 31)
+        repo.storeDepotSnapshot(accountId, day, null, listOf(NewHolding("DE1", null, "ACME", "10", null, 63_000, "EUR")))
+
+        assertEquals(listOf(day.toEpochDay()), repo.statementValuationDates(accountId))
+        assertEquals(emptySet(), repo.liveValuationDates(accountId))
+    }
+
+    @Test
+    fun `live quotes are opt-in per account and persist`() {
+        val file = File(Files.createTempDirectory("pvault-quotes").toFile(), "v.pvault")
+        val accountId = VaultManager.create(file).let { vault ->
+            val repo = VaultRepository(vault)
+            val id = repo.addAccount("Depot", AccountType.DEPOT, institution = "ING")
+            assertEquals(0L, repo.account(id)?.liveQuotes, "live prices must be off by default")
+            repo.setLiveQuotesEnabled(id, true)
+            vault.close()
+            id
+        }
+        VaultManager.open(file).let { vault ->
+            val repo = VaultRepository(vault)
+            assertEquals(1L, repo.account(accountId)?.liveQuotes)
+            repo.setLiveQuotesEnabled(accountId, false)
+            assertEquals(0L, repo.account(accountId)?.liveQuotes)
+            vault.close()
+        }
+    }
+
+    @Test
+    fun `a vault created before live prices gains the new columns on open`() {
+        val file = File(Files.createTempDirectory("pvault-legacy-quotes").toFile(), "v.pvault")
+        VaultManager.create(file).close()
+        // Simulate an older vault by dropping the columns this feature introduced.
+        DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { c ->
+            c.createStatement().use { s ->
+                s.execute("ALTER TABLE account DROP COLUMN liveQuotes")
+                s.execute("ALTER TABLE holding DROP COLUMN quoteAt")
+            }
+        }
+
+        VaultManager.open(file).let { vault ->
+            val repo = VaultRepository(vault)
+            val accountId = repo.addAccount("Depot", AccountType.DEPOT)
+            repo.setLiveQuotesEnabled(accountId, true)
+            assertEquals(1L, repo.account(accountId)?.liveQuotes)
+            repo.storeDepotSnapshot(accountId, LocalDate.of(2026, 8, 9), null, listOf(
+                NewHolding("DE1", null, "ACME", "10", "6.50", 65_000, "EUR", quoteAt = 1_786_132_583_000L),
+            ))
+            assertEquals(1_786_132_583_000L, repo.latestHoldings(accountId).single().quoteAt)
+            vault.close()
+        }
+    }
+
+    @Test
     fun `deleteBatch reverts an import and exposes dedup hashes`() {
         val repo = repo()
         val accountId = repo.addAccount("Giro", AccountType.GIRO)

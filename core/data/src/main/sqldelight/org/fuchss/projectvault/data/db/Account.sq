@@ -10,7 +10,11 @@ CREATE TABLE account (
     iban TEXT,
     openingBalanceCents INTEGER NOT NULL DEFAULT 0,
     openingDate INTEGER,
-    createdAt INTEGER NOT NULL
+    createdAt INTEGER NOT NULL,
+    -- Opt-in for live securities prices (DEPOT accounts). Off by default: enabling it is the only
+    -- thing that ever lets this app talk to the network. Stored in the vault so the choice travels
+    -- with the file rather than living in per-machine UI prefs.
+    liveQuotes INTEGER NOT NULL DEFAULT 0
 );
 
 selectAllAccounts:
@@ -22,6 +26,9 @@ SELECT * FROM account WHERE id = ?;
 insertAccount:
 INSERT INTO account(id, name, type, currency, institution, iban, openingBalanceCents, openingDate, createdAt)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+setLiveQuotes:
+UPDATE account SET liveQuotes = ? WHERE id = ?;
 
 deleteAccount:
 DELETE FROM account WHERE id = ?;

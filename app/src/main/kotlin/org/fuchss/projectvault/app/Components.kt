@@ -1,6 +1,9 @@
 package org.fuchss.projectvault.app
 
 import androidx.compose.animation.animateColorAsState
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -250,6 +253,34 @@ internal fun LogoutGlyph(color: Color) {
         drawLine(color, Offset(w * 0.68f, midY + h * 0.16f), Offset(end, midY), strokeWidth = sw, cap = StrokeCap.Round)
     }
 }
+
+/** A circular-arrow "refresh" glyph — the manual live-price refresh in the Depot pane. */
+@Composable
+internal fun RefreshGlyph(color: Color) {
+    Canvas(Modifier.size(17.dp)) {
+        val sw = 1.8.dp.toPx()
+        val inset = sw / 2f + size.minDimension * 0.08f
+        // An almost-closed circle: the gap is where the arrowhead sits.
+        drawArc(
+            color = color,
+            startAngle = -55f,
+            sweepAngle = 290f,
+            useCenter = false,
+            topLeft = Offset(inset, inset),
+            size = Size(size.width - inset * 2, size.height - inset * 2),
+            style = Stroke(width = sw, cap = StrokeCap.Round),
+        )
+        // Arrowhead at the open end, pointing clockwise.
+        val r = (size.minDimension - inset * 2) / 2f
+        val c = Offset(size.width / 2f, size.height / 2f)
+        val tip = Offset(c.x + r * cos(-55f.toRadians()), c.y + r * sin(-55f.toRadians()))
+        val barb = size.minDimension * 0.24f
+        drawLine(color, tip, Offset(tip.x - barb, tip.y - barb * 0.15f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, tip, Offset(tip.x - barb * 0.15f, tip.y + barb), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+private fun Float.toRadians(): Float = (this * PI / 180f).toFloat()
 
 /** Loads a bundled classpath image (e.g. `branding/app-icon.png`) into a [Painter] without the
  *  deprecated `painterResource(String)`; decodes via Skia and memoizes. */

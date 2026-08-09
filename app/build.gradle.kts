@@ -20,6 +20,7 @@ dependencies {
     implementation(project(":core:import"))
     implementation(project(":core:classification"))
     implementation(project(":core:analytics"))
+    implementation(project(":core:quotes"))
 
     // SLF4J backend so PDFBox's import diagnostics are actually printed (WARN+ to stderr) instead of
     // being swallowed by the no-op logger.
