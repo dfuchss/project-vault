@@ -5,12 +5,14 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,7 +25,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -36,7 +40,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
@@ -177,6 +183,7 @@ internal fun MenuPanel(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(16.dp)
+    val scroll = rememberScrollState()
     Surface(
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -184,12 +191,19 @@ internal fun MenuPanel(
         shadowElevation = 16.dp,
         modifier = modifier.widthIn(min = 190.dp),
     ) {
-        Column(
-            Modifier
-                .heightIn(max = MenuRowHeight * maxRows + 12.dp)
-                .padding(horizontal = 6.dp, vertical = 6.dp),
-            content = content,
-        )
+        // The cap sits on the Box so the overlaid indicator can match the row area exactly.
+        Box(Modifier.heightIn(max = MenuRowHeight * maxRows + 12.dp)) {
+            Column(
+                Modifier
+                    // Pad, then scroll: the inset stays put while the rows move. A plain Column only
+                    // *clips* what does not fit, which silently made long lists (every category,
+                    // every month) partly unreachable — hence the explicit scroll.
+                    .padding(horizontal = 6.dp, vertical = 6.dp)
+                    .verticalScroll(scroll),
+                content = content,
+            )
+            ScrollIndicator(scroll)
+        }
     }
 }
 
@@ -257,6 +271,37 @@ internal fun VaultMenuDivider() {
         Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
         color = hairline(),
     )
+}
+
+/**
+ * A slim scroll indicator for [MenuPanel], drawn by hand like the app's other glyphs.
+ *
+ * Deliberately not Compose Desktop's `VerticalScrollbar`: this panel is rendered inside a
+ * `DropdownMenu`, whose `Modifier.width(IntrinsicSize.Max)` runs an **intrinsic** measure pass that
+ * hands children infinite constraints. That scrollbar's measure policy uses `constraints.maxHeight`
+ * verbatim and blows up on it (`Size(8 x 2147483647) is out of range`). A [Canvas] is a `Spacer`
+ * underneath, which handles unbounded constraints safely, and `matchParentSize` keeps the indicator
+ * out of the Box's size calculation entirely.
+ */
+@Composable
+private fun BoxScope.ScrollIndicator(scroll: ScrollState) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Canvas(Modifier.matchParentSize().padding(vertical = 6.dp, horizontal = 2.dp)) {
+        // maxValue is Int.MAX_VALUE until the first layout pass measures the content; drawing then
+        // would paint a sliver on every menu's first frame. 0 means everything already fits.
+        if (scroll.maxValue <= 0 || scroll.maxValue == Int.MAX_VALUE) return@Canvas
+        val viewport = size.height
+        val thickness = 4.dp.toPx()
+        val thumb = (viewport * viewport / (viewport + scroll.maxValue)).coerceAtLeast(24.dp.toPx())
+        val travel = (viewport - thumb).coerceAtLeast(0f)
+        val top = travel * (scroll.value.toFloat() / scroll.maxValue).coerceIn(0f, 1f)
+        drawRoundRect(
+            color = color.copy(alpha = 0.35f),
+            topLeft = Offset(size.width - thickness, top),
+            size = Size(thickness, thumb),
+            cornerRadius = CornerRadius(thickness / 2f, thickness / 2f),
+        )
+    }
 }
 
 @Composable
