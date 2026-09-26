@@ -27,6 +27,10 @@ class CategorizerTest {
     private fun tx(counterparty: String, hash: String) =
         NewTransaction(LocalDate.of(2026, 7, 1), null, -1160, "EUR", counterparty, "purpose", "Kartenzahlung", hash)
 
+    /** Incoming money, with a purpose that carries the meaning (as a real credit line does). */
+    private fun credit(counterparty: String, purpose: String, hash: String) =
+        NewTransaction(LocalDate.of(2026, 7, 1), null, 24990, "EUR", counterparty, purpose, "Gutschrift", hash)
+
     /** Deterministic fake: anything restaurant-ish maps to one axis, everything else to another. */
     private class FakeEmbedder : Embedder {
         override fun available() = true
@@ -224,6 +228,65 @@ class CategorizerTest {
         assertEquals(id, byCp["GOFUNDME campaign"]!!.categoryId, "the new keyword classifies")
     }
 
+    /** A transaction whose merchant lives in the purpose only — no counterparty at all. */
+    private fun purposeOnly(purpose: String, hash: String) =
+        NewTransaction(LocalDate.of(2026, 7, 1), null, -1160, "EUR", null, purpose, "Lastschrift", hash)
+
+    @Test
+    fun `learns from the purpose when the statement carries no counterparty`() {
+        val (repo, categorizer, account) = setup()
+        repo.insertTransactions(account, null, listOf(
+            purposeOnly("Beitrag Kletterhalle Nordwand 07/2026", "a"),
+            purposeOnly("Beitrag Kletterhalle Nordwand 08/2026", "b"),
+        ))
+        val first = repo.transactions(account).first { it.purpose.endsWith("07/2026") }
+
+        categorizer.setCategory(account, first, "cat-leisure")
+
+        val byPurpose = repo.transactions(account).associateBy { it.purpose }
+        assertEquals("cat-leisure", byPurpose["Beitrag Kletterhalle Nordwand 07/2026"]!!.categoryId)
+        assertEquals(
+            "cat-leisure",
+            byPurpose["Beitrag Kletterhalle Nordwand 08/2026"]!!.categoryId,
+            "a correction on a counterparty-less row must still learn and propagate",
+        )
+        // …and the learned rule classifies the next import, not just the rows already there.
+        repo.insertTransactions(account, null, listOf(purposeOnly("Beitrag Kletterhalle Nordwand 09/2026", "c")))
+        categorizer.classifyAccount(account)
+        assertEquals("cat-leisure", repo.transactions(account).first { it.purpose.endsWith("09/2026") }.categoryId)
+    }
+
+    @Test
+    fun `a purely numeric purpose token is never learned as a keyword`() {
+        val (repo, categorizer, account) = setup()
+        // A reference number identifies one transaction, so it must not become a rule; "Rechnung" may.
+        repo.insertTransactions(account, null, listOf(purposeOnly("8829301 Rechnung Hausverwaltung", "a")))
+        val txn = repo.transactions(account).single()
+
+        categorizer.setCategory(account, txn, "cat-housing")
+
+        val learned = repo.categoryRules().single { it.source == "USER" }
+        assertEquals("RECHNUNG", learned.keyword)
+    }
+
+    @Test
+    fun `learned keywords propagate across umlaut spellings`() {
+        val (repo, categorizer, account) = setup()
+        repo.insertTransactions(account, null, listOf(
+            tx("Doenerhaus Karlsruhe", "a"),
+            tx("Dönerhaus Karlsruhe", "b"),
+        ))
+        val folded = repo.transactions(account).first { it.counterparty == "Doenerhaus Karlsruhe" }
+
+        categorizer.setCategory(account, folded, "cat-restaurants")
+
+        assertEquals(
+            "cat-restaurants",
+            repo.transactions(account).first { it.counterparty == "Dönerhaus Karlsruhe" }.categoryId,
+            "propagation folds diacritics on both sides, like the rule engine does",
+        )
+    }
+
     @Test
     fun `learns a rule from a correction and applies it to similar transactions`() {
         val (repo, categorizer, account) = setup()
@@ -238,5 +301,91 @@ class CategorizerTest {
         val byCounterparty = repo.transactions(account).associateBy { it.counterparty }
         assertEquals("cat-shopping", byCounterparty["Blumen Meyer Laden"]!!.categoryId)
         assertEquals("cat-shopping", byCounterparty["Blumen Meyer Filiale"]!!.categoryId, "learned rule should apply")
+    }
+
+    // ---------------------------------------------------------------- amount sign
+
+    private fun kindOf(repo: VaultRepository, categoryId: String?): CategoryKind? =
+        categoryId?.let { id -> repo.categories().firstOrNull { it.id == id }?.kind }
+
+    @Test
+    fun `a credit is never committed an expense category`() {
+        val (repo, categorizer, account) = setup()
+        repo.insertTransactions(
+            account,
+            null,
+            listOf(
+                credit("AMZN Mktp DE", "Rueckerstattung Bestellung", "a"),
+                credit("Techniker Krankenkasse", "Erstattung Zahnarzt", "b"),
+                credit("Arbeitgeber GmbH", "Nettobezuege 07/2026", "c"),
+                credit("Stadtwerke Musterstadt", "Nebenkostenabrechnung Guthaben", "d"),
+            ),
+        )
+        categorizer.classifyAccount(account)
+
+        repo.transactions(account).forEach { txn ->
+            assertTrue(
+                kindOf(repo, txn.categoryId) != CategoryKind.EXPENSE,
+                "credit '${txn.counterparty} ${txn.purpose}' got expense category ${txn.categoryId}",
+            )
+            assertTrue(
+                kindOf(repo, txn.suggestedCategoryId) != CategoryKind.EXPENSE,
+                "credit '${txn.counterparty} ${txn.purpose}' was proposed expense category ${txn.suggestedCategoryId}",
+            )
+        }
+        // The payroll credit is not merely "not an expense" — it is recognised as salary.
+        val salary = repo.transactions(account).single { it.purpose.contains("Nettobezuege") }
+        assertEquals(CAT_SALARY, salary.categoryId)
+    }
+
+    @Test
+    fun `correcting a purchase does not relabel the same merchant's refunds`() {
+        val (repo, categorizer, account) = setup()
+        repo.insertTransactions(
+            account,
+            null,
+            listOf(tx("Kaufhaus Musterstadt", "a"), credit("Kaufhaus Musterstadt", "Retoure Gutschrift", "b")),
+        )
+        val purchase = repo.transactions(account).single { it.amountCents < 0 }
+
+        // Teaching "Kaufhaus -> Shopping" from the purchase must leave the credit alone: an expense
+        // category cannot describe incoming money, whatever the merchant.
+        categorizer.setCategory(account, purchase, "cat-shopping")
+
+        assertEquals("cat-shopping", repo.transactions(account).single { it.amountCents < 0 }.categoryId)
+        val refund = repo.transactions(account).single { it.amountCents > 0 }
+        assertTrue(kindOf(repo, refund.categoryId) != CategoryKind.EXPENSE, "refund relabelled to ${refund.categoryId}")
+        assertEquals(0, categorizer.otherMatchesCount(account, purchase, "cat-shopping"), "refund must not be offered for bulk apply")
+    }
+
+    @Test
+    fun `disabling an expense category sends its credits to the income fallback`() {
+        val (repo, categorizer, account) = setup()
+        repo.insertTransactions(account, null, listOf(tx("Rewe Markt", "a"), credit("Rewe Markt", "Erstattung", "b")))
+        // Force the legacy state this guards against: a credit sitting in an expense category.
+        val refund = repo.transactions(account).single { it.amountCents > 0 }
+        repo.setTransactionCategory(refund.id, "cat-groceries", CategorySource.MANUAL)
+        categorizer.classifyAccount(account)
+
+        repo.disableCategory("cat-groceries", CAT_OTHER, CAT_INCOME)
+
+        assertEquals(CAT_OTHER, repo.transactions(account).single { it.amountCents < 0 }.categoryId)
+        assertEquals(CAT_INCOME, repo.transactions(account).single { it.amountCents > 0 }.categoryId, "credit must not land in Sonstiges")
+    }
+
+    @Test
+    fun `tier 2 never proposes Sonstiges`() {
+        val file = File(Files.createTempDirectory("pv-cat-o").toFile(), "v.pvault")
+        val repo = VaultRepository(VaultManager.create(file))
+        val categorizer = Categorizer(repo, FakeEmbedder()).apply { ensureSeeded() }
+        val account = repo.addAccount("Giro", AccountType.GIRO)
+
+        // An opaque payee no rule matches: Sonstiges used to be the nearest prototype, because it is
+        // the only category whose vector is just its own name.
+        repo.insertTransactions(account, null, listOf(tx("Hans Meier", "a")))
+        categorizer.classifyAccount(account)
+
+        val txn = repo.transactions(account).single()
+        assertTrue(txn.suggestedCategoryId != CAT_OTHER, "Sonstiges must never be a Tier-2 proposal")
     }
 }

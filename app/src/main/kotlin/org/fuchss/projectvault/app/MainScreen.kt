@@ -32,6 +32,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,7 +64,20 @@ import org.fuchss.projectvault.data.db.Txn
 import org.fuchss.projectvault.model.AccountType
 import org.fuchss.projectvault.quotes.BoerseFrankfurtQuoteProvider
 
-/** A pending "apply to similar transactions?" confirmation before a bulk reclassification. */
+/**
+ * A pending "apply to matching transactions?" confirmation before a bulk reclassification.
+ *
+ * [keyword] is the token the correction would learn — carried here so the dialog can name it. It is
+ * usually the merchant, but on a statement line with no counterparty it comes from the purpose, so
+ * the dialog must show what it actually is rather than claim "this merchant".
+ */
+private data class PendingReclassify(
+    val accountId: String,
+    val txn: Txn,
+    val categoryId: String,
+    val otherCount: Int,
+    val keyword: String,
+)
 
 // ---------------------------------------------------------------- Main screen
 
@@ -81,7 +95,10 @@ internal fun MainScreen(
     val strings = LocalStrings.current
     val repo = remember(vault) { VaultRepository(vault) }
     val importService = remember(repo) { ImportService(repo) }
-    val categorizer = remember(repo) { Categorizer(repo, DjlEmbedder()) }
+    // One embedder instance for the whole session: the Categorizer classifies with it and the
+    // Classification screen reports on it, so "model loaded" there means the model that actually runs.
+    val embedder = remember { DjlEmbedder() }
+    val categorizer = remember(repo, embedder) { Categorizer(repo, embedder) }
     // Bulk category assignment + its undo, used by both transaction lists (account view and inbox).
     val bulk = remember(repo, categorizer) { BulkAssign(repo, categorizer) }
     // Constructed eagerly, but inert until an account opts in — see QuoteRefreshService.refresh.
@@ -98,6 +115,7 @@ internal fun MainScreen(
     var filterProfileId by remember { mutableStateOf<String?>(null) }
     var selectedAccountId by remember { mutableStateOf(initialAccountId) }
     var showDashboard by remember { mutableStateOf(initialAccountId == null) }
+    var showClassification by remember { mutableStateOf(false) }
     var showTriage by remember { mutableStateOf(false) }
     var showAddAccount by remember { mutableStateOf(false) }
     var showAddProfile by remember { mutableStateOf(false) }
@@ -106,6 +124,7 @@ internal fun MainScreen(
     var showAddCategory by remember { mutableStateOf(false) }
     var editingCategory by remember { mutableStateOf<Category?>(null) }
     var showManageCategories by remember { mutableStateOf(false) }
+    var pendingReclassify by remember { mutableStateOf<PendingReclassify?>(null) }
     var pendingDeleteBatch by remember { mutableStateOf<ImportBatch?>(null) }
     var pendingDeleteAccount by remember { mutableStateOf<Account?>(null) }
     var pendingEnableQuotes by remember { mutableStateOf<Account?>(null) }
@@ -130,6 +149,41 @@ internal fun MainScreen(
             }
             refresh++
             busy = null
+        }
+    }
+
+    // A correction spreads by the **keyword** it would teach, not by the merchant as such: the
+    // keyword is the merchant when the statement names one, and a word from the purpose otherwise,
+    // and it is matched against counterparty and purpose alike. The bulk apply is offered only when
+    // it would really change something, and the dialog names the keyword so its reach is visible.
+    fun proposeCategory(accountId: String, txn: Txn, categoryId: String) {
+        val keyword = categorizer.learnedKeywordFor(txn)
+        val others = if (keyword == null) 0 else categorizer.otherMatchesCount(accountId, txn, categoryId)
+        if (keyword != null && others > 0) {
+            pendingReclassify = PendingReclassify(accountId, txn, categoryId, others, keyword)
+        } else {
+            categorizer.applyToOne(txn, categoryId)
+            refresh++
+        }
+    }
+
+    // Re-running the classifier walks every transaction of every account and can load the embedding
+    // model, so it goes off the UI thread behind the busy scrim exactly like a categorize pass does.
+    fun reclassify(reclassifyScope: ReclassifyScope) {
+        busy = strings.reclassifyRunning
+        scope.launch {
+            // The scrim is cleared in a `finally`: the pass can throw (loading the embedding model
+            // is the likeliest way), and without this the window would stay blocked with no way out
+            // but restarting the app.
+            try {
+                val r = withContext(Dispatchers.IO) { categorizer.reclassify(reclassifyScope) }
+                status = strings.reclassifyResult(r.cleared, r.committed, r.suggested)
+            } catch (e: Exception) {
+                status = strings.reclassifyFailed(e.message ?: e.toString())
+            } finally {
+                refresh++
+                busy = null
+            }
         }
     }
 
@@ -178,14 +232,16 @@ internal fun MainScreen(
                 owners = owners,
                 balances = balances,
                 filterProfileId = filterProfileId,
-                selectedAccountId = if (showDashboard || showTriage) null else selectedAccountId,
+                selectedAccountId = if (showDashboard || showClassification || showTriage) null else selectedAccountId,
                 dashboardSelected = showDashboard,
+                classificationSelected = showClassification,
                 triageSelected = showTriage,
                 reviewPending = reviewPending,
-                onOverview = { showDashboard = true; showTriage = false; selectedAccountId = null; status = null },
-                onTriage = { showTriage = true; showDashboard = false; selectedAccountId = null; status = null },
+                onOverview = { showDashboard = true; showClassification = false; showTriage = false; selectedAccountId = null; status = null },
+                onClassification = { showClassification = true; showDashboard = false; showTriage = false; selectedAccountId = null; status = null },
+                onTriage = { showTriage = true; showDashboard = false; showClassification = false; selectedAccountId = null; status = null },
                 onFilter = { filterProfileId = it },
-                onSelectAccount = { selectedAccountId = it; showDashboard = false; showTriage = false; status = null },
+                onSelectAccount = { selectedAccountId = it; showDashboard = false; showClassification = false; showTriage = false; status = null },
                 onAddAccount = { showAddAccount = true },
                 onAddProfile = { showAddProfile = true },
                 onManageProfiles = { showManageProfiles = true },
@@ -207,13 +263,28 @@ internal fun MainScreen(
                         bulk = bulk,
                         refreshKey = refresh,
                         status = status,
-                        // A correction from the inbox files the one row. The offer to learn a rule
-                        // from it arrives with the classification screen.
-                        onSetCategory = { _, txn, categoryId -> categorizer.applyToOne(txn, categoryId); refresh++ },
-                        onAcceptSuggestion = { _, txn, categoryId -> categorizer.applyToOne(txn, categoryId); refresh++ },
+                        // A single correction from the inbox behaves exactly as it does in the
+                        // account view — including the offer to learn a rule from it.
+                        onSetCategory = { accountId, txn, categoryId -> proposeCategory(accountId, txn, categoryId) },
+                        onAcceptSuggestion = { accountId, txn, categoryId -> proposeCategory(accountId, txn, categoryId) },
                         onDismissSuggestion = { txn -> categorizer.dismissSuggestion(txn); refresh++ },
                         onManageCategories = { showManageCategories = true },
                         onChanged = { refresh++ },
+                    )
+                } else if (showClassification) {
+                    ClassificationScreen(
+                        repo = repo,
+                        categorizer = categorizer,
+                        embedder = embedder,
+                        // Only enabled categories can be targeted by a rule — a disabled one is
+                        // ignored by the engine anyway (see Categorizer.ruleEngine).
+                        categories = categoryById.values.filter { it.enabled == 1L }.sortedBy { it.name },
+                        categoryById = categoryById,
+                        accountCount = accounts.size,
+                        refreshKey = refresh,
+                        status = status,
+                        onRulesChanged = { refresh++ },
+                        onReclassify = ::reclassify,
                     )
                 } else if (showDashboard) {
                     DashboardScreen(visibleAccounts, repo, categoryById, balances, refresh)
@@ -250,10 +321,12 @@ internal fun MainScreen(
                                 }
                             }
                         },
-                        // A single correction only touches this transaction; the offer to apply it
-                        // to the merchant's other rows arrives with the classification screen.
-                        onSetCategory = { txn, categoryId -> categorizer.applyToOne(txn, categoryId); refresh++ },
-                        onAcceptSuggestion = { txn, categoryId -> categorizer.applyToOne(txn, categoryId); refresh++ },
+                        // A single correction only touches this transaction. Applying it to every
+                        // matching transaction (and learning a rule) is offered explicitly when there
+                        // are siblings — never silently, so one merchant's varied purchases don't get
+                        // mass-miscategorized. See proposeCategory.
+                        onSetCategory = { txn, categoryId -> proposeCategory(selected.id, txn, categoryId) },
+                        onAcceptSuggestion = { txn, categoryId -> proposeCategory(selected.id, txn, categoryId) },
                         onDismissSuggestion = { txn -> categorizer.dismissSuggestion(txn); refresh++ },
                         onDeleteBatch = { batch -> pendingDeleteBatch = batch },
                         // Live prices only ever run from this button — never on open, never on a timer.
@@ -373,6 +446,23 @@ internal fun MainScreen(
             dismissButton = { TextButton(onClick = { pendingDeleteBatch = null }) { Text(strings.cancel) } },
         )
     }
+    val reclassify = pendingReclassify
+    if (reclassify != null) {
+        ApplyToMatchingDialog(
+            initialKeyword = reclassify.keyword,
+            categoryName = categoryById[reclassify.categoryId]?.name ?: strings.thisCategoryFallback,
+            // One read of the account's transactions, reused for every keystroke in the keyword field.
+            countMatches = remember(reclassify) {
+                categorizer.keywordMatchCounter(reclassify.accountId, reclassify.txn, reclassify.categoryId)
+            },
+            onOnlyThisOne = { categorizer.applyToOne(reclassify.txn, reclassify.categoryId); pendingReclassify = null; refresh++ },
+            onApplyToAll = { keyword ->
+                categorizer.setCategory(reclassify.accountId, reclassify.txn, reclassify.categoryId, keyword)
+                pendingReclassify = null
+                refresh++
+            },
+        )
+    }
     if (showManageCategories) {
         ManageCategoriesDialog(
             categories = categoryById.values.sortedBy { it.name },
@@ -400,7 +490,9 @@ internal fun MainScreen(
     if (editCat != null) {
         EditCategoryDialog(
             category = editCat,
-            initialKeywords = categorizer.keywordsFor(editCat.id),
+            // Read once when the dialog opens: inline this was a full categoryRules scan on every
+            // recomposition of the window, and a fresh list each time re-entered the dialog with it.
+            initialKeywords = remember(editCat) { categorizer.keywordsFor(editCat.id) },
             onDismiss = { editingCategory = null },
             onSave = { name, color, keywords ->
                 categorizer.updateCategory(editCat.id, name, color, keywords)
@@ -437,6 +529,66 @@ internal fun MainScreen(
     }
 }
 
+/**
+ * The confirmation before a correction spreads. The **keyword is editable**, because the app's guess
+ * at what a correction means is only a guess: it takes the first usable token of the counterparty
+ * (or of the purpose when there is no counterparty), which is the merchant often enough to be a good
+ * default and wrong often enough that the user must be able to say otherwise — narrowing
+ * "SUPERMARKT" to "SUPERMARKT FIL 12", or widening a payment reference to "VERSICHERUNG".
+ *
+ * The match count updates as the keyword is typed, so the reach of "apply to all" is visible before
+ * it happens rather than discovered afterwards.
+ */
+@Composable
+private fun ApplyToMatchingDialog(
+    initialKeyword: String,
+    categoryName: String,
+    countMatches: (String) -> Int,
+    onOnlyThisOne: () -> Unit,
+    onApplyToAll: (String) -> Unit,
+) {
+    val strings = LocalStrings.current
+    var keyword by remember { mutableStateOf(initialKeyword) }
+    val trimmed = keyword.trim()
+    val valid = trimmed.length >= 2
+    // Counting walks an in-memory list, but only when the keyword actually changed.
+    val others = remember(trimmed) { if (valid) countMatches(trimmed) else 0 }
+
+    AlertDialog(
+        onDismissRequest = onOnlyThisOne,
+        title = { Text(strings.applyToSimilarTitle) },
+        text = {
+            Column(Modifier.width(400.dp)) {
+                Text(strings.applyToSimilarIntro, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = keyword,
+                    onValueChange = { keyword = it },
+                    label = { Text(strings.keywordLabel) },
+                    supportingText = { Text(strings.keywordRuleHelp) },
+                    singleLine = true,
+                    isError = keyword.isNotBlank() && !valid,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (!valid) strings.applyToSimilarNeedsKeyword
+                    else if (others == 0) strings.applyToSimilarNoOthers(categoryName)
+                    else strings.applyToSimilarCount(others, categoryName),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = valid, onClick = { onApplyToAll(trimmed) }) {
+                Text(if (others == 0) strings.rememberRuleOnly else strings.applyToAll(others + 1))
+            }
+        },
+        dismissButton = { TextButton(onClick = onOnlyThisOne) { Text(strings.onlyThisOne) } },
+    )
+}
+
 // ---------------------------------------------------------------- Sidebar
 
 @Composable
@@ -448,9 +600,11 @@ private fun Sidebar(
     filterProfileId: String?,
     selectedAccountId: String?,
     dashboardSelected: Boolean,
+    classificationSelected: Boolean,
     triageSelected: Boolean,
     reviewPending: Int,
     onOverview: () -> Unit,
+    onClassification: () -> Unit,
     onTriage: () -> Unit,
     onFilter: (String?) -> Unit,
     onSelectAccount: (String) -> Unit,
@@ -473,15 +627,24 @@ private fun Sidebar(
     ) {
         NavItem(strings.overview, selected = dashboardSelected, onClick = onOverview, icon = { OverviewGlyph(it) })
         Spacer(Modifier.height(6.dp))
-        // The inbox is the daily task, and its label carries the count so the sidebar says how much
-        // is waiting. Hidden once nothing is waiting — a permanent "Review (0)" trains the eye to
-        // ignore the one place that should mean work — but it stays while you are standing on it, so
-        // filing the last row never pulls the item out from under you.
+        // The inbox sits between the overview and the classifier's settings: it is the daily task,
+        // and its label carries the count so the sidebar says how much is waiting.
+        // Hidden once nothing is waiting: an inbox with nothing in it is not a destination, and a
+        // permanent "Review (0)" trains the eye to ignore the one place that should mean work. Same
+        // reasoning as the "To review" pill and the month dropdown, which also hide when inert.
+        //
+        // It stays while you are standing on it, though. Filing the last row would otherwise pull the
+        // item out from under you — and *navigating* away on your behalf is worse than it sounds: the
+        // screen's undo offer for the bulk write you just made lives in its composition, so leaving
+        // would discard the undo at exactly the moment it matters most. Letting the item linger until
+        // you navigate yourself costs nothing and strands no one. It also means a profile filter that
+        // happens to hide the remaining work can't eject you mid-task.
         if (reviewPending > 0 || triageSelected) {
             NavItem(strings.reviewNav(reviewPending), selected = triageSelected, onClick = onTriage, icon = { ReviewGlyph(it) })
             Spacer(Modifier.height(6.dp))
         }
-        Spacer(Modifier.height(10.dp))
+        NavItem(strings.classification, selected = classificationSelected, onClick = onClassification, icon = { ClassificationGlyph(it) })
+        Spacer(Modifier.height(16.dp))
         SectionHeader(strings.profiles, onAdd = onAddProfile, onManage = if (profiles.isNotEmpty()) onManageProfiles else null)
         Spacer(Modifier.height(6.dp))
         if (profiles.isEmpty()) {

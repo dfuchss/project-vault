@@ -311,6 +311,24 @@ internal fun OverviewGlyph(color: Color) {
     }
 }
 
+/**
+ * A "tune" glyph (three sliders with offset knobs) — the Classification view's navigation icon, and
+ * the closest thing the app has to "the knobs behind the automatic categorization".
+ */
+@Composable
+internal fun ClassificationGlyph(color: Color) {
+    Canvas(Modifier.size(16.dp)) {
+        val sw = 1.7.dp.toPx()
+        val knob = size.minDimension * 0.13f
+        // Rows at 1/5, 1/2 and 4/5 height, each with its knob at a different position.
+        listOf(0.2f to 0.68f, 0.5f to 0.34f, 0.8f to 0.56f).forEach { (y, knobX) ->
+            val cy = size.height * y
+            drawLine(color, Offset(0f, cy), Offset(size.width, cy), strokeWidth = sw, cap = StrokeCap.Round)
+            drawCircle(color, radius = knob, center = Offset(size.width * knobX, cy))
+        }
+    }
+}
+
 /** A toggle chip (profile filters). Same pill language as [SelectPill], without the chevron. */
 @Composable
 internal fun Chip(label: String, selected: Boolean, dot: Color? = null, onClick: () -> Unit) {
