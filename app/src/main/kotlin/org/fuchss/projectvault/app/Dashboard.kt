@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -30,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -47,6 +50,7 @@ import org.fuchss.projectvault.data.ManualRecurring
 import org.fuchss.projectvault.data.VaultRepository
 import org.fuchss.projectvault.data.db.Account
 import org.fuchss.projectvault.data.db.Category
+import org.fuchss.projectvault.model.categoryAllowedForAmount
 
 // ---------------------------------------------------------------- Dashboard
 
@@ -64,21 +68,37 @@ internal fun DashboardScreen(
             AnalyticsTxn(t.amountCents, LocalDate.ofEpochDay(t.bookingDate), t.categoryId, t.categoryId?.let { categoryById[it]?.kind }, t.counterparty)
         }
     }
-    val detected = remember(analyticsTxns) { Recurring.detect(analyticsTxns) }
+    // "Today" is captured once: the rolling windows and the recurring detector's staleness check
+    // resolve against it, and re-reading the clock on every recomposition would invalidate the
+    // memoized filters for nothing.
+    val today = remember { LocalDate.now() }
+    // `asOf` lets the detector decide which series are still alive; it clamps itself to the newest
+    // transaction, so a vault that has not been fed for months does not lose its whole forecast.
+    val detected = remember(analyticsTxns, today) { Recurring.detect(analyticsTxns, asOf = today) }
     // User overrides: rename a detected series or hide a false positive (persisted per merchant key).
     var recurVersion by remember { mutableStateOf(0) }
     val overrides = remember(refreshKey, recurVersion) { repo.recurringOverrides() }
     // Manual series the user added by hand (keyed "manual:<id>"), merged with the detected ones so they
     // show in the list and feed the forecast just the same.
     val manual = remember(refreshKey, recurVersion) { repo.manualRecurring() }
-    val recurring = remember(detected, overrides, manual) {
-        val detectedVisible = detected.filterNot { overrides[it.merchantKey]?.hidden == true }
-        (detectedVisible + manual.map { it.toSeries() }).sortedByDescending { kotlin.math.abs(it.typicalAmountCents) }
+    val recurring = remember(detected, overrides, manual, today) {
+        val detectedVisible = detected
+            .filterNot { overrides[it.merchantKey]?.hidden == true }
+            .filter { it.worthListing(today) }
+        // Live series first: an ended one is kept for the record, but it must never push a bill the
+        // user is still paying out of the (capped) list.
+        (detectedVisible + manual.map { it.toSeries() })
+            .sortedWith(compareByDescending<RecurringSeries> { it.isActive }.thenByDescending { kotlin.math.abs(it.typicalAmountCents) })
     }
+    val endedCount = remember(recurring) { recurring.count { !it.isActive } }
     // Detected series the user hid — surfaced behind a "N hidden" affordance so they can be un-hidden.
-    val hiddenDetected = remember(detected, overrides) {
-        detected.filter { overrides[it.merchantKey]?.hidden == true }
-            .sortedByDescending { kotlin.math.abs(it.typicalAmountCents) }
+    // Hiding takes a series off the list; it does not keep it alive. One that has ended and is past
+    // being worth looking at drops out of here too, on exactly the same rule as a visible one — it is
+    // removed because it stopped happening, never because it was hidden. The override itself stays in
+    // the vault, so if the payments ever resume the series comes back hidden, as the user asked.
+    val hiddenDetected = remember(detected, overrides, today) {
+        detected.filter { overrides[it.merchantKey]?.hidden == true && it.worthListing(today) }
+            .sortedWith(compareByDescending<RecurringSeries> { it.isActive }.thenByDescending { kotlin.math.abs(it.typicalAmountCents) })
     }
     var showingHidden by remember { mutableStateOf(false) }
     var showAllRecurring by remember { mutableStateOf(false) }
@@ -88,7 +108,9 @@ internal fun DashboardScreen(
     // Candidates for a manually-added series: existing counterparties not already auto-detected, each
     // with its typical (median) amount and last date — so adding a series is a selection, not typing.
     val recurringCandidates = remember(analyticsTxns, detected) {
-        val autoKeys = detected.mapTo(HashSet()) { it.merchantKey }
+        // Only *live* series are off-limits: a merchant whose series has ended may be offered again, so
+        // the user can re-add it by hand and keep projecting it if the detector called it dead too soon.
+        val autoKeys = detected.filter { it.isActive }.mapTo(HashSet()) { it.merchantKey }
         analyticsTxns.filter { !it.counterparty.isNullOrBlank() }
             .groupBy { Recurring.merchantKey(it.counterparty!!) }
             .filterKeys { it !in autoKeys }
@@ -115,13 +137,18 @@ internal fun DashboardScreen(
     // mean ± std dev — used to make the forecast realistic and to draw its uncertainty band.
     val variable = remember(analyticsTxns, detected) { Recurring.variableMonthlySpending(analyticsTxns, detected) }
     val months = remember(analyticsTxns) { analyticsTxns.map { YearMonth.from(it.date) }.distinct().sortedDescending() }
+    val years = remember(analyticsTxns) { analyticsTxns.map { it.date.year }.distinct().sortedDescending() }
     // Default to the latest month that has any entries (months is sorted descending).
-    var selectedMonth by remember(months) { mutableStateOf(months.firstOrNull()) }
-    val periodTxns = remember(analyticsTxns, selectedMonth) {
-        val m = selectedMonth
-        if (m == null) analyticsTxns else analyticsTxns.filter { YearMonth.from(it.date) == m }
-    }
-    val periodLabel = selectedMonth?.let(::formatYearMonth) ?: strings.allTime
+    var period by remember(months) { mutableStateOf(months.firstOrNull()?.let(DashboardPeriod::ofMonth) ?: DashboardPeriod.allTime) }
+    var editingRange by remember { mutableStateOf(false) }
+    // The donut slice the user drilled into (null = no drill-down open).
+    var drillDown by remember { mutableStateOf<CategoryDrillDown?>(null) }
+    val range = remember(period, today) { period.resolve(today) }
+    val periodTxns = remember(analyticsTxns, range) { analyticsTxns.inPeriod(range) }
+    val periodLabel = strings.periodLabel(period)
+    // Only a single-month selection drives the month-specific affordances (the highlighted cash-flow
+    // row and the expected-income estimate) — those are meaningless over a multi-month range.
+    val selectedMonth = period.selectedMonth
 
     val netWorth = accounts.sumOf { balances[it.id] ?: 0L }
     val incomeExpense = remember(periodTxns) { Analytics.incomeExpense(periodTxns) }
@@ -152,12 +179,41 @@ internal fun DashboardScreen(
             if (months.isNotEmpty()) {
                 var menu by remember { mutableStateOf(false) }
                 Box {
-                    SelectPill(label = periodLabel, expanded = menu, active = selectedMonth != null, onClick = { menu = true })
+                    SelectPill(label = periodLabel, expanded = menu, active = period.kind != PeriodKind.ALL_TIME, onClick = { menu = true })
+                    // One selector for every window the dashboard supports: all time, the rolling
+                    // windows, a year, a single month, or a hand-typed range. The groups are separated
+                    // by hairlines; the panel scrolls once the list outgrows its cap.
                     VaultMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        VaultMenuItem(strings.allTime, selected = selectedMonth == null, onClick = { selectedMonth = null; menu = false })
-                        months.forEach { m ->
-                            VaultMenuItem(formatYearMonth(m), selected = selectedMonth == m, onClick = { selectedMonth = m; menu = false })
+                        VaultMenuItem(strings.allTime, selected = period.kind == PeriodKind.ALL_TIME, onClick = { period = DashboardPeriod.allTime; menu = false })
+                        VaultMenuDivider()
+                        listOf(PeriodKind.LAST_3M, PeriodKind.LAST_6M, PeriodKind.LAST_12M, PeriodKind.YEAR_TO_DATE).forEach { kind ->
+                            VaultMenuItem(
+                                label = strings.periodLabel(DashboardPeriod.of(kind)),
+                                selected = period.kind == kind,
+                                onClick = { period = DashboardPeriod.of(kind); menu = false },
+                            )
                         }
+                        if (years.isNotEmpty()) {
+                            VaultMenuDivider()
+                            years.forEach { y ->
+                                VaultMenuItem(
+                                    label = y.toString(),
+                                    selected = period.kind == PeriodKind.YEAR && period.year == y,
+                                    onClick = { period = DashboardPeriod.ofYear(y); menu = false },
+                                )
+                            }
+                        }
+                        VaultMenuDivider()
+                        months.forEach { m ->
+                            VaultMenuItem(formatYearMonth(m), selected = selectedMonth == m, onClick = { period = DashboardPeriod.ofMonth(m); menu = false })
+                        }
+                        VaultMenuDivider()
+                        VaultMenuItem(
+                            label = strings.customRange,
+                            selected = period.kind == PeriodKind.CUSTOM,
+                            emphasis = true,
+                            onClick = { editingRange = true; menu = false },
+                        )
                     }
                 }
             }
@@ -176,18 +232,31 @@ internal fun DashboardScreen(
         Spacer(Modifier.height(16.dp))
         VaultCard(modifier = Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
             Column {
-                Text(strings.spendingByCategory(periodLabel), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        strings.spendingByCategory(periodLabel),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (byCategory.isNotEmpty()) {
+                        Text(strings.clickCategoryHint, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
                 if (byCategory.isEmpty()) {
                     Text(strings.noSpendingYet, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     val totalSpending = byCategory.sumOf { it.amountCents }
-                    val max = byCategory.first().amountCents.coerceAtLeast(1)
-                    val shown = byCategory.take(8)
+                    // The tail past the cap becomes one "Other" slice, so ring and legend always add up
+                    // to the total in the centre instead of silently dropping the smallest categories.
+                    val slices = remember(byCategory) { donutSlices(byCategory) }
+                    val max = slices.maxOf { it.amountCents }.coerceAtLeast(1)
+                    val otherColor = MaterialTheme.colorScheme.onSurfaceVariant
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(156.dp), contentAlignment = Alignment.Center) {
                             DonutChart(
-                                slices = shown.map { parseHexColor(categoryById[it.categoryId]?.color) to it.amountCents.toFloat() },
+                                slices = slices.map { sliceColor(it, categoryById, otherColor) to it.amountCents.toFloat() },
                                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
                                 modifier = Modifier.fillMaxSize(),
                             )
@@ -198,14 +267,24 @@ internal fun DashboardScreen(
                         }
                         Spacer(Modifier.width(28.dp))
                         Column(Modifier.weight(1f)) {
-                            shown.forEach { total ->
-                                val category = total.categoryId?.let { categoryById[it] }
-                                CategoryBar(
-                                    name = category?.name ?: strings.uncategorized,
-                                    color = parseHexColor(category?.color),
-                                    amount = total.amountCents,
-                                    fraction = total.amountCents.toFloat() / max,
-                                )
+                            slices.forEach { slice ->
+                                val color = sliceColor(slice, categoryById, otherColor)
+                                val name = sliceLabel(slice, categoryById, strings)
+                                // Each legend row is the drill-down affordance: it opens the rows behind
+                                // that slice (the "Other" slice opens all the categories it merged).
+                                Box(
+                                    Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { drillDown = CategoryDrillDown(name, color, slice.categoryIds.toSet(), slice.amountCents) }
+                                        .padding(horizontal = 4.dp),
+                                ) {
+                                    CategoryBar(
+                                        name = name,
+                                        color = color,
+                                        amount = slice.amountCents,
+                                        fraction = slice.amountCents.toFloat() / max,
+                                    )
+                                }
                             }
                         }
                     }
@@ -216,7 +295,13 @@ internal fun DashboardScreen(
         Spacer(Modifier.height(16.dp))
         VaultCard(modifier = Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
             Column {
-                Text(strings.monthlyCashFlow, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(strings.monthlyCashFlow, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    // This card is a trailing 12-month history — it deliberately ignores the period
+                    // pill (a one-month window would leave a single bar and no trend at all). Say so,
+                    // so the reader doesn't take it for a filtered view.
+                    Text(strings.trailingWindowNote, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Spacer(Modifier.height(12.dp))
                 if (monthly.isEmpty()) {
                     Text(strings.noTransactionsYetImport, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -239,7 +324,7 @@ internal fun DashboardScreen(
                             Modifier.fillMaxWidth()
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-                                .clickable { selectedMonth = ym }
+                                .clickable { period = DashboardPeriod.ofMonth(ym) }
                                 .padding(horizontal = 6.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -279,10 +364,12 @@ internal fun DashboardScreen(
                     shownRecurring.forEach { s ->
                         val manualId = s.merchantKey.removePrefix("manual:").takeIf { s.merchantKey.startsWith("manual:") }
                         val label = if (manualId != null) s.label else overrides[s.merchantKey]?.label ?: s.label
+                        // An ended series is dimmed rather than dropped: someone who cancelled a contract
+                        // should see that the app noticed, not find the line silently gone.
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable {
                                 if (manualId != null) editingManual = manual.firstOrNull { it.id == manualId } else editingRecurring = s
-                            }.padding(horizontal = 6.dp, vertical = 5.dp),
+                            }.padding(horizontal = 6.dp, vertical = 5.dp).alpha(if (s.isActive) 1f else 0.55f),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
@@ -292,11 +379,36 @@ internal fun DashboardScreen(
                                     if (manualId != null) { Spacer(Modifier.width(6.dp)); Badge(strings.manualBadge) }
                                     s.categoryId?.let { categoryById[it] }?.let { Spacer(Modifier.width(6.dp)); CategoryChip(it) }
                                     Spacer(Modifier.width(6.dp))
-                                    Text(strings.nextOccurrence(formatLocalDate(s.nextExpectedDate)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        if (s.isActive) strings.nextOccurrence(formatLocalDate(s.nextExpectedDate))
+                                        else strings.endedLastSeen(formatYearMonth(YearMonth.from(s.lastDate))),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                // A rent increase or a price hike: say what it was, what it is, and since when.
+                                s.amountChange?.let { change ->
+                                    Text(
+                                        strings.amountChanged(
+                                            formatCents(change.previousCents),
+                                            formatCents(change.currentCents),
+                                            formatYearMonth(YearMonth.from(change.since)),
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                             }
                             Text(formatCents(s.typicalAmountCents), color = if (s.typicalAmountCents < 0) MoneyNegative else MoneyPositive, fontWeight = FontWeight.Medium)
                         }
+                    }
+                    if (endedCount > 0) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            strings.endedExcludedNote(endedCount),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     if (recurring.size > 12) {
                         TextButton(onClick = { showAllRecurring = !showAllRecurring }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
@@ -310,7 +422,13 @@ internal fun DashboardScreen(
         Spacer(Modifier.height(16.dp))
         VaultCard(modifier = Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
             Column {
-                Text(strings.forecastTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(strings.forecastTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    // The forecast is built from the full history (recurring detection) and a trailing
+                    // 12-month mean ± σ of variable spending. Narrowing it to the selected period would
+                    // change what σ means and corrupt the cone of uncertainty — so it stays fixed.
+                    Text(strings.forecastWindowNote, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     strings.fixedSummary(formatCents(fixed.incomeCents), formatCents(fixed.expenseCents), formatCents(fixed.netCents)),
@@ -398,6 +516,24 @@ internal fun DashboardScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    editing.amountChange?.let { change ->
+                        Text(
+                            strings.amountChanged(
+                                formatCents(change.previousCents),
+                                formatCents(change.currentCents),
+                                formatYearMonth(YearMonth.from(change.since)),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (!editing.isActive) {
+                        Text(
+                            strings.endedExplanation(formatYearMonth(YearMonth.from(editing.lastDate))),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(strings.name) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(8.dp))
@@ -440,6 +576,21 @@ internal fun DashboardScreen(
         )
     }
 
+    if (editingRange) {
+        CustomRangeDialog(
+            initial = period,
+            onApply = { from, to -> period = DashboardPeriod.custom(from, to); editingRange = false },
+            onDismiss = { editingRange = false },
+        )
+    }
+
+    val drill = drillDown
+    if (drill != null) {
+        // The rows come out of the already-filtered period list — a drill-down costs no extra query.
+        val drillRows = remember(periodTxns, drill) { spendingRows(periodTxns, drill.categoryIds) }
+        CategoryDrillDownDialog(drill = drill, periodLabel = periodLabel, rows = drillRows, onDismiss = { drillDown = null })
+    }
+
     if (showingHidden) {
         HiddenRecurringDialog(
             hidden = hiddenDetected,
@@ -452,6 +603,137 @@ internal fun DashboardScreen(
             onDismiss = { showingHidden = false },
         )
     }
+}
+
+/** The slice the user clicked in the spending donut, with everything the drill-down needs to show it. */
+private data class CategoryDrillDown(
+    val label: String,
+    val color: Color,
+    /** The categories behind the slice — one, or all of the ones the "Other" slice merged. */
+    val categoryIds: Set<String?>,
+    val amountCents: Long,
+)
+
+/** A slice's colour: its category's, or a neutral tone for the merged "Other" remainder. */
+private fun sliceColor(slice: DonutSlice, categoryById: Map<String, Category>, otherColor: Color): Color =
+    if (slice.isOther) otherColor else parseHexColor(slice.categoryId?.let { categoryById[it] }?.color)
+
+/** A slice's legend label: the category name, "Uncategorized", or "Other (n categories)". */
+private fun sliceLabel(slice: DonutSlice, categoryById: Map<String, Category>, strings: Strings): String = when {
+    slice.isOther -> strings.otherCategories(slice.categoryIds.size)
+    else -> slice.categoryId?.let { categoryById[it]?.name } ?: strings.uncategorized
+}
+
+/**
+ * The spending behind one donut slice: every transaction of that category (or of all the categories
+ * the "Other" slice merged) inside the selected period, biggest spend first. Uncategorized drills down
+ * too — those rows are exactly the ones a user wants to find and label.
+ */
+@Composable
+private fun CategoryDrillDownDialog(
+    drill: CategoryDrillDown,
+    periodLabel: String,
+    rows: List<AnalyticsTxn>,
+    onDismiss: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Dot(drill.color)
+                Spacer(Modifier.width(8.dp))
+                Text(drill.label, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                Text(formatCents(drill.amountCents), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MoneyNegative)
+            }
+        },
+        text = {
+            Column(Modifier.width(520.dp)) {
+                Text(
+                    strings.categoryDetailSubtitle(periodLabel, rows.size),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                if (rows.isEmpty()) {
+                    Text(strings.noTransactionsInPeriod, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    // Lazy: a wide period can put thousands of rows behind a single category.
+                    LazyColumn(Modifier.heightIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        items(rows) { t ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        t.counterparty?.takeIf { it.isNotBlank() } ?: strings.unknownCounterparty,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(formatLocalDate(t.date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                // Spending is shown as a magnitude everywhere on this card (the ring's
+                                // centre total, the legend bars, this dialog's header), with the red
+                                // doing the sign — so the rows negate too rather than being the one
+                                // place a minus appears.
+                                Text(formatCents(-t.amountCents), color = MoneyNegative, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(strings.done) } },
+    )
+}
+
+/**
+ * A free from/to range. Dates are typed as `YYYY-MM-DD` — the same plain-text entry the recurring
+ * dialog uses, since the app has no calendar widget. Either side may stay empty for an open end.
+ */
+@Composable
+private fun CustomRangeDialog(
+    initial: DashboardPeriod,
+    onApply: (from: LocalDate?, to: LocalDate?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val strings = LocalStrings.current
+    var fromText by remember { mutableStateOf(initial.customFrom?.toString() ?: "") }
+    var toText by remember { mutableStateOf(initial.customTo?.toString() ?: "") }
+    fun parse(text: String) = runCatching { LocalDate.parse(text.trim()) }.getOrNull()
+    val from = parse(fromText)
+    val to = parse(toText)
+    val fromError = fromText.isNotBlank() && from == null
+    val toError = toText.isNotBlank() && to == null
+    // An entirely empty range would just be "All time", which the menu already offers.
+    val valid = !fromError && !toError && (from != null || to != null)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.customRangeTitle) },
+        text = {
+            Column(Modifier.width(360.dp)) {
+                OutlinedTextField(
+                    value = fromText, onValueChange = { fromText = it },
+                    label = { Text(strings.fromDateLabel) }, singleLine = true, isError = fromError,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = toText, onValueChange = { toText = it },
+                    label = { Text(strings.toDateLabel) }, singleLine = true, isError = toError,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(strings.customRangeHint, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(enabled = valid, onClick = { onApply(from, to) }) { Text(strings.save) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
+    )
 }
 
 /** Lists the recurring series the user has hidden, each with an "Unhide" action to restore it. */
@@ -482,6 +764,14 @@ private fun HiddenRecurringDialog(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Badge(strings.cadenceLabel(s.cadence))
                                     s.categoryId?.let { categoryById[it] }?.let { Spacer(Modifier.width(6.dp)); CategoryChip(it) }
+                                    if (!s.isActive) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            strings.endedLastSeen(formatYearMonth(YearMonth.from(s.lastDate))),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                             Text(formatCents(s.typicalAmountCents), color = if (s.typicalAmountCents < 0) MoneyNegative else MoneyPositive, fontWeight = FontWeight.Medium)
@@ -642,6 +932,14 @@ private fun RecurringSeriesDialog(
         },
     )
 }
+
+/**
+ * Whether a series still belongs on the recurring list at all. A live one always does; an ended one
+ * stays — dimmed — until [RecurringSeries.forgettableAfter], which scales with its cadence, and then
+ * drops off. The same rule decides the visible list and the hidden list, so "hidden" never means
+ * "kept forever".
+ */
+private fun RecurringSeries.worthListing(today: LocalDate): Boolean = isActive || today < forgettableAfter
 
 /** Median of a list of longs (0 for empty). */
 private fun medianL(values: List<Long>): Long {

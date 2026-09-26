@@ -51,21 +51,6 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.cos
 import kotlin.math.sin
 import org.fuchss.projectvault.model.AccountType
-import org.fuchss.projectvault.model.CategoryKind
-
-/**
- * Which category kinds a transaction may take, by sign: a **positive** amount can only be income
- * (Gehalt / Weitere Einkünfte) or a transfer (Umbuchung & Sparen); a **negative** amount only an
- * expense or a transfer — never income. Used to filter the picker and constrain new categories.
- */
-internal fun allowedKindsForAmount(amountCents: Long): List<CategoryKind> = when {
-    amountCents > 0 -> listOf(CategoryKind.INCOME, CategoryKind.TRANSFER)
-    amountCents < 0 -> listOf(CategoryKind.EXPENSE, CategoryKind.TRANSFER)
-    else -> CategoryKind.entries.toList()
-}
-
-internal fun categoryAllowedForAmount(amountCents: Long, kind: CategoryKind): Boolean =
-    kind in allowedKindsForAmount(amountCents)
 
 // ---------------------------------------------------------------- Small reusable bits
 
