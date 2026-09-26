@@ -60,10 +60,10 @@ import org.fuchss.projectvault.data.db.Category
 import org.fuchss.projectvault.data.db.ImportBatch
 import org.fuchss.projectvault.data.db.Profile
 import org.fuchss.projectvault.data.db.Txn
+import org.fuchss.projectvault.model.AccountType
 import org.fuchss.projectvault.quotes.BoerseFrankfurtQuoteProvider
 
 /** A pending "apply to similar transactions?" confirmation before a bulk reclassification. */
-private data class PendingReclassify(val txn: Txn, val categoryId: String, val otherCount: Int)
 
 // ---------------------------------------------------------------- Main screen
 
@@ -82,6 +82,8 @@ internal fun MainScreen(
     val repo = remember(vault) { VaultRepository(vault) }
     val importService = remember(repo) { ImportService(repo) }
     val categorizer = remember(repo) { Categorizer(repo, DjlEmbedder()) }
+    // Bulk category assignment + its undo, used by both transaction lists (account view and inbox).
+    val bulk = remember(repo, categorizer) { BulkAssign(repo, categorizer) }
     // Constructed eagerly, but inert until an account opts in — see QuoteRefreshService.refresh.
     val quoteRefresh = remember(repo) { QuoteRefreshService(repo, BoerseFrankfurtQuoteProvider()) }
     remember(repo) { categorizer.ensureSeeded() } // install seed categories/rules on first open
@@ -96,6 +98,7 @@ internal fun MainScreen(
     var filterProfileId by remember { mutableStateOf<String?>(null) }
     var selectedAccountId by remember { mutableStateOf(initialAccountId) }
     var showDashboard by remember { mutableStateOf(initialAccountId == null) }
+    var showTriage by remember { mutableStateOf(false) }
     var showAddAccount by remember { mutableStateOf(false) }
     var showAddProfile by remember { mutableStateOf(false) }
     var showManageProfiles by remember { mutableStateOf(false) }
@@ -103,7 +106,6 @@ internal fun MainScreen(
     var showAddCategory by remember { mutableStateOf(false) }
     var editingCategory by remember { mutableStateOf<Category?>(null) }
     var showManageCategories by remember { mutableStateOf(false) }
-    var pendingReclassify by remember { mutableStateOf<PendingReclassify?>(null) }
     var pendingDeleteBatch by remember { mutableStateOf<ImportBatch?>(null) }
     var pendingDeleteAccount by remember { mutableStateOf<Account?>(null) }
     var pendingEnableQuotes by remember { mutableStateOf<Account?>(null) }
@@ -138,6 +140,11 @@ internal fun MainScreen(
     val visibleAccounts = accounts.filter { acc ->
         filterProfileId == null || owners[acc.id].orEmpty().any { it.id == filterProfileId }
     }
+    // The inbox badge. A COUNT per visible account (see VaultRepository.uncategorizedCount) rather
+    // than reading every transaction, since it is recomputed on every refresh.
+    val reviewPending = remember(refresh, visibleAccounts) {
+        visibleAccounts.filter { it.type != AccountType.DEPOT }.sumOf { repo.uncategorizedCount(it.id) }.toInt()
+    }
     val selected = accounts.firstOrNull { it.id == selectedAccountId }
 
     // The whole window sits on a softly graded backdrop; panels lift off it with their own fills.
@@ -171,11 +178,14 @@ internal fun MainScreen(
                 owners = owners,
                 balances = balances,
                 filterProfileId = filterProfileId,
-                selectedAccountId = if (showDashboard) null else selectedAccountId,
+                selectedAccountId = if (showDashboard || showTriage) null else selectedAccountId,
                 dashboardSelected = showDashboard,
-                onOverview = { showDashboard = true; selectedAccountId = null; status = null },
+                triageSelected = showTriage,
+                reviewPending = reviewPending,
+                onOverview = { showDashboard = true; showTriage = false; selectedAccountId = null; status = null },
+                onTriage = { showTriage = true; showDashboard = false; selectedAccountId = null; status = null },
                 onFilter = { filterProfileId = it },
-                onSelectAccount = { selectedAccountId = it; showDashboard = false; status = null },
+                onSelectAccount = { selectedAccountId = it; showDashboard = false; showTriage = false; status = null },
                 onAddAccount = { showAddAccount = true },
                 onAddProfile = { showAddProfile = true },
                 onManageProfiles = { showManageProfiles = true },
@@ -187,7 +197,25 @@ internal fun MainScreen(
             VerticalDivider(color = hairline())
             Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
               Box(Modifier.widthIn(max = 1200.dp).fillMaxWidth().fillMaxHeight().padding(20.dp)) {
-                if (showDashboard) {
+                if (showTriage) {
+                    TriageScreen(
+                        repo = repo,
+                        accounts = visibleAccounts,
+                        // Only enabled categories are selectable, as in the account view.
+                        categories = categoryById.values.filter { it.enabled == 1L }.toList(),
+                        categoryById = categoryById,
+                        bulk = bulk,
+                        refreshKey = refresh,
+                        status = status,
+                        // A correction from the inbox files the one row. The offer to learn a rule
+                        // from it arrives with the classification screen.
+                        onSetCategory = { _, txn, categoryId -> categorizer.applyToOne(txn, categoryId); refresh++ },
+                        onAcceptSuggestion = { _, txn, categoryId -> categorizer.applyToOne(txn, categoryId); refresh++ },
+                        onDismissSuggestion = { txn -> categorizer.dismissSuggestion(txn); refresh++ },
+                        onManageCategories = { showManageCategories = true },
+                        onChanged = { refresh++ },
+                    )
+                } else if (showDashboard) {
                     DashboardScreen(visibleAccounts, repo, categoryById, balances, refresh)
                 } else if (selected == null) {
                     EmptyHint(if (accounts.isEmpty()) strings.addAccountToStart else strings.selectAccount)
@@ -203,6 +231,7 @@ internal fun MainScreen(
                         // set so chips on any lingering reference still render.
                         categories = categoryById.values.filter { it.enabled == 1L },
                         categoryById = categoryById,
+                        bulk = bulk,
                         onImport = {
                             val files = openFileDialogs(strings.importStatementsDialogTitle)
                             if (files.isNotEmpty()) {
@@ -221,20 +250,10 @@ internal fun MainScreen(
                                 }
                             }
                         },
-                        onSetCategory = { txn, categoryId ->
-                            // A single correction only touches this transaction. Applying to every
-                            // same-name transaction (and learning a rule) is offered explicitly when
-                            // there are siblings — never silently, so one merchant's varied purchases
-                            // don't get mass-miscategorized.
-                            val n = categorizer.otherMatchesCount(selected.id, txn, categoryId)
-                            if (n > 0) pendingReclassify = PendingReclassify(txn, categoryId, n)
-                            else { categorizer.applyToOne(txn, categoryId); refresh++ }
-                        },
-                        onAcceptSuggestion = { txn, categoryId ->
-                            val n = categorizer.otherMatchesCount(selected.id, txn, categoryId)
-                            if (n > 0) pendingReclassify = PendingReclassify(txn, categoryId, n)
-                            else { categorizer.applyToOne(txn, categoryId); refresh++ }
-                        },
+                        // A single correction only touches this transaction; the offer to apply it
+                        // to the merchant's other rows arrives with the classification screen.
+                        onSetCategory = { txn, categoryId -> categorizer.applyToOne(txn, categoryId); refresh++ },
+                        onAcceptSuggestion = { txn, categoryId -> categorizer.applyToOne(txn, categoryId); refresh++ },
                         onDismissSuggestion = { txn -> categorizer.dismissSuggestion(txn); refresh++ },
                         onDeleteBatch = { batch -> pendingDeleteBatch = batch },
                         // Live prices only ever run from this button — never on open, never on a timer.
@@ -252,6 +271,7 @@ internal fun MainScreen(
                                 refresh++; busy = null
                             }
                         },
+                        onChanged = { refresh++ },
                     )
                 }
               }
@@ -353,25 +373,6 @@ internal fun MainScreen(
             dismissButton = { TextButton(onClick = { pendingDeleteBatch = null }) { Text(strings.cancel) } },
         )
     }
-    val reclassify = pendingReclassify
-    if (reclassify != null && selected != null) {
-        val categoryName = categoryById[reclassify.categoryId]?.name ?: strings.thisCategoryFallback
-        AlertDialog(
-            onDismissRequest = { categorizer.applyToOne(reclassify.txn, reclassify.categoryId); pendingReclassify = null; refresh++ },
-            title = { Text(strings.applyToSimilarTitle) },
-            text = { Text(strings.applyToSimilarBody(reclassify.otherCount, categoryName)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    categorizer.setCategory(selected.id, reclassify.txn, reclassify.categoryId); pendingReclassify = null; refresh++
-                }) { Text(strings.applyToAll(reclassify.otherCount + 1)) }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    categorizer.applyToOne(reclassify.txn, reclassify.categoryId); pendingReclassify = null; refresh++
-                }) { Text(strings.onlyThisOne) }
-            },
-        )
-    }
     if (showManageCategories) {
         ManageCategoriesDialog(
             categories = categoryById.values.sortedBy { it.name },
@@ -447,7 +448,10 @@ private fun Sidebar(
     filterProfileId: String?,
     selectedAccountId: String?,
     dashboardSelected: Boolean,
+    triageSelected: Boolean,
+    reviewPending: Int,
     onOverview: () -> Unit,
+    onTriage: () -> Unit,
     onFilter: (String?) -> Unit,
     onSelectAccount: (String) -> Unit,
     onAddAccount: () -> Unit,
@@ -468,7 +472,16 @@ private fun Sidebar(
             .padding(16.dp),
     ) {
         NavItem(strings.overview, selected = dashboardSelected, onClick = onOverview, icon = { OverviewGlyph(it) })
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(6.dp))
+        // The inbox is the daily task, and its label carries the count so the sidebar says how much
+        // is waiting. Hidden once nothing is waiting — a permanent "Review (0)" trains the eye to
+        // ignore the one place that should mean work — but it stays while you are standing on it, so
+        // filing the last row never pulls the item out from under you.
+        if (reviewPending > 0 || triageSelected) {
+            NavItem(strings.reviewNav(reviewPending), selected = triageSelected, onClick = onTriage, icon = { ReviewGlyph(it) })
+            Spacer(Modifier.height(6.dp))
+        }
+        Spacer(Modifier.height(10.dp))
         SectionHeader(strings.profiles, onAdd = onAddProfile, onManage = if (profiles.isNotEmpty()) onManageProfiles else null)
         Spacer(Modifier.height(6.dp))
         if (profiles.isEmpty()) {

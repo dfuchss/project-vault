@@ -24,6 +24,7 @@ val Strings.filterAnyTime get() = translate { en("Any time"); de("Beliebiger Zei
 val Strings.searchPlaceholder get() = translate { en("Search counterparty or purpose"); de("Zahlungspartner oder Verwendungszweck suchen") }
 
 // inspector
+val Strings.accountLabel get() = translate { en("Account"); de("Konto") }
 val Strings.transaction get() = translate { en("Transaction"); de("Umsatz") }
 val Strings.amount get() = translate { en("Amount"); de("Betrag") }
 val Strings.bookingDate get() = translate { en("Booking date"); de("Buchungsdatum") }
@@ -95,3 +96,6 @@ val Strings.quotesUnavailable get() = translate {
     en("No prices available right now — nothing was changed.")
     de("Derzeit keine Kurse verfügbar — es wurde nichts geändert.")
 }
+
+/** Dismisses the transaction inspector — the only way out of it when it overlays a narrow window. */
+val Strings.close get() = translate { en("Close"); de("Schließen") }

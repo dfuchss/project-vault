@@ -1,18 +1,14 @@
 package org.fuchss.projectvault.app
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +28,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +55,7 @@ import org.fuchss.projectvault.data.db.ImportBatch
 import org.fuchss.projectvault.data.db.Profile
 import org.fuchss.projectvault.data.db.Txn
 import org.fuchss.projectvault.model.AccountType
+import org.fuchss.projectvault.model.categoryAllowedForAmount
 
 // ---------------------------------------------------------------- Account detail
 
@@ -71,6 +69,7 @@ internal fun AccountDetail(
     status: String?,
     categories: List<Category>,
     categoryById: Map<String, Category>,
+    bulk: BulkAssign,
     onImport: () -> Unit,
     onSetCategory: (Txn, String) -> Unit,
     onAcceptSuggestion: (Txn, String) -> Unit,
@@ -82,6 +81,7 @@ internal fun AccountDetail(
     onEditOwners: () -> Unit,
     onManageCategories: () -> Unit,
     onClassify: () -> Unit,
+    onChanged: () -> Unit,
 ) {
     val strings = LocalStrings.current
     val batches = remember(account.id, refreshKey) { repo.batches(account.id) }
@@ -90,12 +90,19 @@ internal fun AccountDetail(
     }
     var selectedTxnId by remember(account.id) { mutableStateOf<String?>(null) }
     val selectedTxn = txns.firstOrNull { it.id == selectedTxnId }
-    var search by remember(account.id) { mutableStateOf("") }
-    var filter by remember(account.id) { mutableStateOf("ALL") } // ALL | NONE | REVIEW | <categoryId>
-    var period by remember(account.id) { mutableStateOf<YearMonth?>(null) } // null = all time
+    // Memoized on the batch id: read straight from the inspector's argument list, this was a SQLite
+    // query per recomposition — i.e. one per hover animation frame anywhere on the screen.
+    val selectedBatch = remember(selectedTxn?.importBatchId, refreshKey) { repo.batch(selectedTxn?.importBatchId) }
+    val filters = remember(account.id) { TxnListFilters() }
     val txnMonths = remember(txns) {
         txns.map { YearMonth.from(LocalDate.ofEpochDay(it.bookingDate)) }.distinct().sortedDescending()
     }
+    // Multi-select for bulk categorization: ids (so it survives a re-read of the list), plus the
+    // anchor a shift-click extends from and one step of undo for the last bulk write.
+    var checked by remember(account.id) { mutableStateOf(emptySet<String>()) }
+    var anchorId by remember(account.id) { mutableStateOf<String?>(null) }
+    var lastBulk by remember(account.id) { mutableStateOf<BulkResult?>(null) }
+    var bulkMessage by remember(account.id) { mutableStateOf<String?>(null) }
     var showImportHistory by remember(account.id) { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
@@ -158,73 +165,140 @@ internal fun AccountDetail(
         status?.let { Spacer(Modifier.height(8.dp)); Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary) }
         Spacer(Modifier.height(16.dp))
 
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            Column(Modifier.weight(1f).fillMaxHeight()) {
-                if (account.type == AccountType.DEPOT) {
-                    DepotPane(account, repo, refreshKey, onRefreshQuotes, onEnableQuotes)
-                } else {
-                    val filtered = txns.filter { t ->
-                        (period == null || YearMonth.from(LocalDate.ofEpochDay(t.bookingDate)) == period) &&
-                            (search.isBlank() || (t.counterparty ?: "").contains(search, true) || t.purpose.contains(search, true)) &&
-                            when (filter) {
-                                "ALL" -> true
-                                // Uncategorized and To-review are disjoint: a txn with a pending
-                                // suggestion belongs to "To review", not "Uncategorized".
-                                "NONE" -> t.categoryId == null && t.suggestedCategoryId == null
-                                "REVIEW" -> t.categoryId == null && t.suggestedCategoryId != null
-                                else -> t.categoryId == filter
-                            }
+        if (account.type == AccountType.DEPOT) {
+            // A Depot has no per-row inspector, so it simply fills the pane.
+            Column(Modifier.weight(1f).fillMaxWidth()) {
+                DepotPane(account, repo, refreshKey, onRefreshQuotes, onEnableQuotes)
+            }
+        } else {
+            ListWithInspector(
+                // The panel's presence never changes the list's width — see ListWithInspector.
+                inspectorVisible = selectedTxn != null,
+                modifier = Modifier.weight(1f),
+                inspector = {
+                    selectedTxn?.let { txn ->
+                        TxnInspector(
+                            onClose = { selectedTxnId = null },
+                            txn = txn,
+                            batch = selectedBatch,
+                            categories = categories,
+                            current = txn.categoryId?.let { categoryById[it] },
+                            suggested = txn.suggestedCategoryId?.let { categoryById[it] },
+                            onSetCategory = { onSetCategory(txn, it) },
+                            onAcceptSuggestion = { onAcceptSuggestion(txn, it) },
+                            onDismissSuggestion = { onDismissSuggestion(txn) },
+                            onManageCategories = onManageCategories,
+                        )
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val countLabel = if (filtered.size == txns.size) "${txns.size}" else strings.countOf(filtered.size, txns.size)
-                        Text(strings.transactionsHeader(countLabel), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        val uncategorized = txns.count { it.categoryId == null }
-                        if (uncategorized > 0) OutlinedButton(onClick = onClassify) { Text(strings.categorizeN(uncategorized)) }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    TransactionFilters(
-                        search = search,
-                        onSearch = { search = it },
-                        filter = filter,
-                        onFilter = { filter = it },
-                        categories = categories,
-                        categoryById = categoryById,
-                        months = txnMonths,
-                        period = period,
-                        onPeriod = { period = it },
+                },
+            ) {
+                // Filtering and sorting the whole list is `remember`ed on its inputs. Inline, it
+                // re-ran on **every** recomposition — every keystroke in the search field, and
+                // every frame of a row's hover animation.
+                val filtered = remember(
+                    txns, filters.search, filters.filter, filters.period, filters.sort,
+                    filters.minAmount, filters.maxAmount, filters.fromDate, filters.toDate,
+                ) {
+                    filterTransactions(
+                        txns = txns,
+                        search = filters.search,
+                        filter = filters.filter,
+                        period = filters.period,
+                        minCents = parseAmountInput(filters.minAmount),
+                        maxCents = parseAmountInput(filters.maxAmount),
+                        from = parseDateInput(filters.fromDate),
+                        to = parseDateInput(filters.toDate),
+                        sort = filters.sort,
                     )
-                    Spacer(Modifier.height(8.dp))
-                    if (txns.isEmpty()) EmptyHint(strings.noTransactionsImport)
-                    else if (filtered.isEmpty()) EmptyHint(strings.noTransactionsMatchFilter)
-                    else LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        items(filtered) { txn ->
-                            TxnRow(
-                                txn = txn,
-                                category = txn.categoryId?.let { categoryById[it] },
-                                suggested = txn.suggestedCategoryId?.let { categoryById[it] },
-                                selected = txn.id == selectedTxnId,
-                                onClick = { selectedTxnId = txn.id },
-                            )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val countLabel = if (filtered.size == txns.size) "${txns.size}" else strings.countOf(filtered.size, txns.size)
+                    Text(strings.transactionsHeader(countLabel), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    val uncategorized = remember(txns) { txns.count { it.categoryId == null } }
+                    if (uncategorized > 0) OutlinedButton(onClick = onClassify) { Text(strings.categorizeN(uncategorized)) }
+                }
+                Spacer(Modifier.height(8.dp))
+                // "To review" is shown only while something is waiting for review; if the last
+                // such row is accepted or dismissed the filter falls back, so the view can't be
+                // left staring at an empty list under a pill that is no longer there.
+                val reviewAvailable = remember(txns) { hasReviewable(txns) }
+                LaunchedEffect(reviewAvailable) { filters.coerceFilter(reviewAvailable) }
+                TxnFilterBar(
+                    filters = filters,
+                    categories = categories,
+                    categoryById = categoryById,
+                    months = txnMonths,
+                    showReviewFilter = reviewAvailable,
+                    trailing = {
+                        if (filtered.isNotEmpty()) {
+                            TextButton(
+                                onClick = {
+                                    // A cancelled save dialog leaves the status line alone.
+                                    exportTxns(filtered, categoryById, { account.name }, strings)
+                                        ?.let { message -> bulkMessage = message; lastBulk = null }
+                                },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            ) { Text(strings.exportCsvButton, style = MaterialTheme.typography.labelMedium) }
                         }
+                    },
+                )
+                // Resolved against the rows that still exist: a selection can outlive its
+                // transactions (undoing the import they came from), and a bar that says "0 selected"
+                // while offering every category is worse than no bar at all.
+                val selectedTxns = remember(checked, txns) { txns.filter { it.id in checked } }
+                if (selectedTxns.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    BulkActionBar(
+                        count = selectedTxns.size,
+                        amounts = selectedTxns.map { it.amountCents },
+                        categories = categories,
+                        onApply = { categoryId ->
+                            lastBulk = bulk.apply(selectedTxns, categoryId)
+                            bulkMessage = strings.bulkAssigned(selectedTxns.size, categoryById[categoryId]?.name ?: "")
+                            checked = emptySet(); anchorId = null
+                            onChanged()
+                        },
+                        onClear = { checked = emptySet(); anchorId = null },
+                        onSelectAllMatching = { checked = checked + filtered.map { it.id } },
+                    )
+                }
+                val undoable = lastBulk
+                val message = bulkMessage
+                if (message != null) {
+                    Spacer(Modifier.height(8.dp))
+                    if (undoable != null) {
+                        BulkUndoLine(
+                            message = message,
+                            onUndo = {
+                                bulk.undo(undoable)
+                                bulkMessage = strings.bulkUndone(undoable.changes.size)
+                                lastBulk = null
+                                onChanged()
+                            },
+                            onDismiss = { bulkMessage = null; lastBulk = null },
+                        )
+                    } else {
+                        Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                     }
                 }
-            }
-            // Inspector (transaction detail + origin + category picker) — only when a row is selected,
-            // so the list uses full width the rest of the time. Import history lives behind "History".
-            if (selectedTxn != null && account.type != AccountType.DEPOT) {
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.width(300.dp).fillMaxHeight()) {
-                    TxnInspector(
-                        txn = selectedTxn,
-                        batch = repo.batch(selectedTxn.importBatchId),
-                        categories = categories,
-                        current = selectedTxn.categoryId?.let { categoryById[it] },
-                        suggested = selectedTxn.suggestedCategoryId?.let { categoryById[it] },
-                        onSetCategory = { onSetCategory(selectedTxn, it) },
-                        onAcceptSuggestion = { onAcceptSuggestion(selectedTxn, it) },
-                        onDismissSuggestion = { onDismissSuggestion(selectedTxn) },
-                        onManageCategories = onManageCategories,
-                    )
+                Spacer(Modifier.height(8.dp))
+                if (txns.isEmpty()) EmptyHint(strings.noTransactionsImport)
+                else if (filtered.isEmpty()) EmptyHint(strings.noTransactionsMatchFilter)
+                else LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    items(filtered, key = { it.id }) { txn ->
+                        TxnRow(
+                            txn = txn,
+                            category = txn.categoryId?.let { categoryById[it] },
+                            suggested = txn.suggestedCategoryId?.let { categoryById[it] },
+                            selected = txn.id == selectedTxnId,
+                            checked = txn.id in checked,
+                            onClick = { selectedTxnId = txn.id },
+                            onToggleCheck = { shift ->
+                                checked = toggleSelection(filtered.map { it.id }, checked, anchorId, txn.id, shift)
+                                anchorId = txn.id
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -235,45 +309,21 @@ internal fun AccountDetail(
     }
 }
 
-@Composable
-private fun TxnRow(txn: Txn, category: Category?, suggested: Category?, selected: Boolean, onClick: () -> Unit) {
-    val strings = LocalStrings.current
-    // The row a pointer is over lights up, so a long list stays easy to track across its full width.
-    val interaction = remember { MutableInteractionSource() }
-    val hovered by interaction.collectIsHoveredAsState()
-    val container by animateColorAsState(
-        when {
-            selected -> MaterialTheme.colorScheme.primaryContainer
-            hovered -> MaterialTheme.colorScheme.surfaceContainerHigh
-            else -> Color.Transparent
-        },
-        label = "txn-row",
-    )
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
-        color = container,
-        interactionSource = interaction,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.width(96.dp)) {
-                Text(formatEpochDay(txn.bookingDate), style = MaterialTheme.typography.bodySmall)
-                txn.valueDate?.let { Text("${strings.valueDateShort} ${formatEpochDay(it)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-            Column(Modifier.weight(1f)) {
-                Text(txn.counterparty ?: txn.purpose, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    txn.bookingType?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.width(8.dp)) }
-                    when {
-                        category != null -> CategoryChip(category)
-                        suggested != null -> SuggestedChip(suggested)
-                    }
-                }
-            }
-            Text(formatCents(txn.amountCents), color = if (txn.amountCents < 0) MoneyNegative else MoneyPositive, fontWeight = FontWeight.Medium)
-        }
-    }
+/**
+ * Exports the rows currently on screen (filtered **and** sorted as shown) to a file the user picks,
+ * returning the status line to display — or null when the save dialog was cancelled.
+ */
+internal fun exportTxns(
+    txns: List<Txn>,
+    categoryById: Map<String, Category>,
+    accountNameOf: (Txn) -> String,
+    strings: Strings,
+): String? {
+    val target = saveFileDialog(strings.exportCsvDialogTitle, "transactions.csv") ?: return null
+    return runCatching {
+        writeCsv(target, exportCsv(exportRowsOf(txns, categoryById, accountNameOf), strings.exportColumns))
+        strings.exportedRows(txns.size, target.name)
+    }.getOrElse { strings.exportFailed(it.message) }
 }
 
 @Composable
@@ -288,86 +338,14 @@ internal fun CategoryChip(category: Category) {
     }
 }
 
-@Composable
-private fun SuggestedChip(category: Category) {
-    Surface(shape = RoundedCornerShape(6.dp), color = Color.Transparent, border = BorderStroke(1.dp, parseHexColor(category.color))) {
-        Row(Modifier.padding(horizontal = 6.dp, vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-            Dot(parseHexColor(category.color))
-            Spacer(Modifier.width(4.dp))
-            Text("${category.name} ?", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun TransactionFilters(
-    search: String,
-    onSearch: (String) -> Unit,
-    filter: String,
-    onFilter: (String) -> Unit,
-    categories: List<Category>,
-    categoryById: Map<String, Category>,
-    months: List<YearMonth>,
-    period: YearMonth?,
-    onPeriod: (YearMonth?) -> Unit,
-) {
-    val strings = LocalStrings.current
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SearchField(value = search, onValueChange = onSearch, modifier = Modifier.fillMaxWidth())
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            FilterPill(strings.filterAll, selected = filter == "ALL") { onFilter("ALL") }
-            FilterPill(strings.filterUncategorized, selected = filter == "NONE") { onFilter("NONE") }
-            FilterPill(strings.filterToReview, selected = filter == "REVIEW") { onFilter("REVIEW") }
-
-            // A specific category filter lives in a dropdown chip that shows the active category.
-            val activeCategory = categoryById[filter]
-            var menu by remember { mutableStateOf(false) }
-            Box {
-                SelectPill(
-                    label = activeCategory?.name ?: strings.filterCategory,
-                    expanded = menu,
-                    active = activeCategory != null,
-                    leadingDot = activeCategory?.let { parseHexColor(it.color) },
-                    onClick = { menu = true },
-                )
-                VaultMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    categories.forEach { c ->
-                        VaultMenuItem(
-                            label = c.name,
-                            selected = c.id == filter,
-                            leadingDot = parseHexColor(c.color),
-                            onClick = { onFilter(c.id); menu = false },
-                        )
-                    }
-                }
-            }
-
-            // A time filter (by month) — only meaningful once transactions span more than one month.
-            if (months.size > 1) {
-                var periodMenu by remember { mutableStateOf(false) }
-                Box {
-                    SelectPill(
-                        label = period?.let(::formatYearMonth) ?: strings.filterAnyTime,
-                        expanded = periodMenu,
-                        active = period != null,
-                        onClick = { periodMenu = true },
-                    )
-                    VaultMenu(expanded = periodMenu, onDismissRequest = { periodMenu = false }) {
-                        VaultMenuItem(strings.filterAnyTime, selected = period == null, onClick = { onPeriod(null); periodMenu = false })
-                        months.forEach { m ->
-                            VaultMenuItem(formatYearMonth(m), selected = period == m, onClick = { onPeriod(m); periodMenu = false })
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 /** A compact, pill-shaped search field with a drawn magnifier and an inline clear button. */
 @Composable
-private fun SearchField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
-    val strings = LocalStrings.current
+internal fun SearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = LocalStrings.current.searchPlaceholder,
+) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -380,7 +358,7 @@ private fun SearchField(value: String, onValueChange: (String) -> Unit, modifier
             Spacer(Modifier.width(10.dp))
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                 if (value.isEmpty()) {
-                    Text(strings.searchPlaceholder, style = MaterialTheme.typography.bodyMedium, color = muted)
+                    Text(placeholder, style = MaterialTheme.typography.bodyMedium, color = muted)
                 }
                 BasicTextField(
                     value = value,
@@ -420,55 +398,15 @@ private fun MagnifierIcon(color: Color) {
     }
 }
 
-/** A selectable filter chip (optionally with a leading colour dot and a dropdown arrow). */
 @Composable
-private fun FilterPill(
-    label: String,
-    selected: Boolean,
-    leadingDot: Color? = null,
-    onClick: () -> Unit,
-) {
-    val scheme = MaterialTheme.colorScheme
-    val interaction = remember { MutableInteractionSource() }
-    val hovered by interaction.collectIsHoveredAsState()
-    val container by animateColorAsState(
-        when {
-            selected -> scheme.primaryContainer
-            hovered -> scheme.surfaceContainerHighest
-            else -> scheme.surfaceContainerHigh
-        },
-        label = "filter-pill",
-    )
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(50),
-        color = container,
-        border = BorderStroke(1.dp, if (selected) scheme.primary.copy(alpha = 0.55f) else hairline()),
-        interactionSource = interaction,
-    ) {
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            if (leadingDot != null) Dot(leadingDot)
-            Text(
-                label,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                color = if (selected) scheme.onPrimaryContainer else scheme.onSurface,
-            )
-        }
-    }
-}
-
-@Composable
-private fun TxnInspector(
+internal fun TxnInspector(
     txn: Txn,
     batch: ImportBatch?,
     categories: List<Category>,
     current: Category?,
     suggested: Category?,
+    accountName: String? = null,
+    onClose: () -> Unit,
     onSetCategory: (String) -> Unit,
     onAcceptSuggestion: (String) -> Unit,
     onDismissSuggestion: () -> Unit,
@@ -477,8 +415,19 @@ private fun TxnInspector(
     val strings = LocalStrings.current
     VaultCard(modifier = Modifier.fillMaxWidth(), corner = 16.dp, padding = PaddingValues(16.dp)) {
         Column {
-            Text(strings.transaction, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            // The close button is not decoration: below 720dp this card is an overlay pinned over the
+            // right of the list, clicking the row again is idempotent, and nothing else deselects — so
+            // without it the panel covers the list until you change account or leave the screen.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(strings.transaction, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                TextButton(onClick = onClose, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                    Text(strings.close, style = MaterialTheme.typography.labelMedium)
+                }
+            }
             Spacer(Modifier.height(10.dp))
+            // In the cross-account inbox the row's account is part of the identity of what you are
+            // looking at; in the account view it is the page header, so it isn't repeated.
+            accountName?.let { InfoRow(strings.accountLabel, it) }
             InfoRow(strings.amount, formatCents(txn.amountCents))
             InfoRow(strings.bookingDate, formatEpochDay(txn.bookingDate))
             InfoRow(strings.valueDate, formatEpochDayOrDash(txn.valueDate))
@@ -512,7 +461,10 @@ private fun TxnInspector(
                 }
             }
 
-            if (current == null && suggested != null) {
+            // A proposal whose kind the amount's sign forbids is never offered for Accept — the
+            // classifier no longer produces one, but vaults categorized before it consulted the sign
+            // still hold them, and one click would commit an expense category onto incoming money.
+            if (current == null && suggested != null && categoryAllowedForAmount(txn.amountCents, suggested.kind)) {
                 Spacer(Modifier.height(8.dp))
                 Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                     Column(Modifier.padding(10.dp)) {
@@ -533,7 +485,7 @@ private fun TxnInspector(
             Text(strings.purpose, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(txn.purpose, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(14.dp))
-            HorizontalDivider()
+            HorizontalDivider(color = hairline())
             Spacer(Modifier.height(10.dp))
             Text(strings.origin, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (batch != null) {

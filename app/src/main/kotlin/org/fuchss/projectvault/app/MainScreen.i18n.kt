@@ -11,6 +11,12 @@ fun Strings.readingStatements(n: Int) = translate {
     de("Lese $n ${if (n == 1) "Auszug" else "Auszüge"}…")
 }
 fun Strings.importFailed(message: String?) = translate { en("Import failed: $message"); de("Import fehlgeschlagen: $message") }
+
+/** A re-classification that threw. The pass is atomic, so this means "nothing changed", not "half done". */
+fun Strings.reclassifyFailed(message: String?) = translate {
+    en("Re-classification failed — nothing was changed: $message")
+    de("Neuklassifizierung fehlgeschlagen — nichts wurde geändert: $message")
+}
 fun Strings.filesSkipped(n: Int) = translate {
     en("$n file(s) could not be parsed and were skipped.")
     de("$n Datei(en) konnten nicht gelesen werden und wurden übersprungen.")
@@ -45,16 +51,27 @@ fun Strings.removedImport(source: String) = translate { en("Removed import \"$so
 
 // -- Reclassify confirmation -------------------------------------------------
 val Strings.thisCategoryFallback get() = translate { en("this category"); de("diese Kategorie") }
-val Strings.applyToSimilarTitle get() = translate { en("Apply to similar transactions?"); de("Auf ähnliche Umsätze anwenden?") }
-fun Strings.applyToSimilarBody(otherCount: Int, categoryName: String) = translate {
-    en(
-        "This merchant has $otherCount other transaction(s) that aren't set manually. " +
-            "Set them all to \"$categoryName\" (and remember it), or categorize only this one?",
-    )
-    de(
-        "Dieser Zahlungspartner hat $otherCount weitere(n) Umsatz/Umsätze, die nicht manuell gesetzt sind. " +
-            "Alle auf „$categoryName“ setzen (und merken) oder nur diesen kategorisieren?",
-    )
+val Strings.applyToSimilarTitle get() = translate { en("Apply to matching transactions?"); de("Auf passende Umsätze anwenden?") }
+
+// The dialog never says "this merchant": the keyword is the merchant only when the statement carries
+// one (and a word from the purpose otherwise), it is matched against counterparty and purpose alike,
+// and the user can edit it — so the copy talks about the keyword it shows, and nothing else.
+val Strings.applyToSimilarIntro get() = translate {
+    en("This correction can be remembered as a rule. Check the keyword it should match on — it is only a guess at what you mean.")
+    de("Diese Korrektur kann als Regel gemerkt werden. Prüfe das Stichwort, auf das sie passen soll — es ist nur eine Vermutung.")
 }
+fun Strings.applyToSimilarCount(otherCount: Int, categoryName: String) = translate {
+    en("$otherCount other transaction(s) contain it and aren't set manually — they would be set to \"$categoryName\".")
+    de("$otherCount weitere(r) Umsatz/Umsätze enthalten es und sind nicht manuell gesetzt — sie würden auf „$categoryName“ gesetzt.")
+}
+fun Strings.applyToSimilarNoOthers(categoryName: String) = translate {
+    en("No other transaction contains it. The rule → \"$categoryName\" is still learned, for future imports.")
+    de("Kein weiterer Umsatz enthält es. Die Regel → „$categoryName“ wird trotzdem für künftige Importe gemerkt.")
+}
+val Strings.applyToSimilarNeedsKeyword get() = translate {
+    en("Enter at least two characters.")
+    de("Gib mindestens zwei Zeichen ein.")
+}
+val Strings.rememberRuleOnly get() = translate { en("Remember rule"); de("Regel merken") }
 fun Strings.applyToAll(total: Int) = translate { en("Apply to all ($total)"); de("Auf alle anwenden ($total)") }
 val Strings.onlyThisOne get() = translate { en("Only this one"); de("Nur diesen") }
