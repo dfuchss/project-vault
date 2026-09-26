@@ -189,7 +189,7 @@ class CategorizerTest {
         categorizer.classifyAccount(account)
         assertEquals("cat-groceries", repo.transactions(account).single().categoryId)
 
-        repo.disableCategory("cat-groceries", CAT_OTHER)
+        repo.disableCategory("cat-groceries", CAT_OTHER, CAT_INCOME)
         assertEquals(CAT_OTHER, repo.transactions(account).single().categoryId, "existing entry moved to Sonstiges")
 
         // A fresh REWE transaction must no longer auto-commit to the disabled grocery category.

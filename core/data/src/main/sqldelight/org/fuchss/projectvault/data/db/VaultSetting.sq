@@ -1,0 +1,20 @@
+-- Small key/value store for settings that belong to the *vault* rather than to the user's machine
+-- (those live in AppPrefs). Classifier tuning — which Tier-2 suggester runs and at which confidence
+-- threshold — travels with the vault file exactly like categories and rules do, so a vault copied to
+-- another machine keeps the behaviour it was tuned for.
+--
+-- Values are stored as TEXT and parsed by the caller (see ClassifierSettings), which keeps the table
+-- open-ended: a new setting is a new key, never a migration.
+CREATE TABLE vaultSetting (
+    key   TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+selectAllSettings:
+SELECT * FROM vaultSetting;
+
+upsertSetting:
+INSERT OR REPLACE INTO vaultSetting(key, value) VALUES (?, ?);
+
+deleteSetting:
+DELETE FROM vaultSetting WHERE key = ?;

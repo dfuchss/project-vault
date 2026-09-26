@@ -379,7 +379,7 @@ internal fun MainScreen(
             onAddCategory = { showAddCategory = true },
             onEditCategory = { editingCategory = it },
             onDelete = { id -> repo.deleteCategory(id); refresh++ },
-            onDisable = { id -> repo.disableCategory(id, CAT_OTHER); refresh++ },
+            onDisable = { id -> repo.disableCategory(id, CAT_OTHER, CAT_INCOME); refresh++ },
             onEnable = { id -> repo.enableCategory(id); refresh++ },
             onDismiss = { showManageCategories = false },
         )

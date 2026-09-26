@@ -29,6 +29,12 @@ SELECT * FROM txn WHERE accountId = ? ORDER BY bookingDate DESC, id;
 countTxnsForAccount:
 SELECT COUNT(*) FROM txn WHERE accountId = ?;
 
+-- How many rows of an account still carry no committed category — the review inbox's badge. A
+-- COUNT rather than a read of every transaction, since it is asked for every account on every
+-- refresh and the rows themselves are not wanted.
+countUncategorizedForAccount:
+SELECT COUNT(*) FROM txn WHERE accountId = ? AND categoryId IS NULL;
+
 sumAmountForAccount:
 SELECT COALESCE(SUM(amountCents), 0) FROM txn WHERE accountId = ?;
 
@@ -65,6 +71,20 @@ UPDATE txn SET suggestedCategoryId = NULL WHERE suggestedCategoryId = ?;
 -- preserving each row's categorySource.
 reassignCategoryReferences:
 UPDATE txn SET categoryId = :newCategoryId WHERE categoryId = :oldCategoryId;
+
+-- Reassignment split by sign, so disabling a category can send its debits and its credits to
+-- different fallbacks. Moving an incoming payment into an expense category is a category error
+-- (see CategorySign in :core:model), and a bulk reassign is exactly where that would happen.
+--
+-- The split is drawn at the same place `allowedKindsForAmount` draws it: only `> 0` is money coming
+-- in. A zero-amount row has no direction, so it is not evidence of income and stays on the neutral
+-- side — the two predicates are complementary, so no row is ever left behind in the disabled
+-- category either.
+reassignDebitCategoryReferences:
+UPDATE txn SET categoryId = :newCategoryId WHERE categoryId = :oldCategoryId AND amountCents <= 0;
+
+reassignCreditCategoryReferences:
+UPDATE txn SET categoryId = :newCategoryId WHERE categoryId = :oldCategoryId AND amountCents > 0;
 
 countTxnsByCategory:
 SELECT COUNT(*) FROM txn WHERE categoryId = ?;

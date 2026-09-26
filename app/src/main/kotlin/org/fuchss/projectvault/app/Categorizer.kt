@@ -25,7 +25,7 @@ data class ClassifyResult(val committed: Int, val suggested: Int)
 
 // Stable seed-category ids used for account-type defaults (see SeedCatalog).
 private const val CAT_TRANSFERS = "cat-transfers"
-private const val CAT_INCOME = "cat-income"
+internal const val CAT_INCOME = "cat-income"
 
 /** The salary seed category — used to base the "expected income" estimate on paychecks only. */
 internal const val CAT_SALARY = "cat-salary"

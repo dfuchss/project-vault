@@ -283,7 +283,7 @@ class VaultRepositoryTest {
         repo.setTransactionCategory(txns[0].id, catId, "MANUAL")   // committed to the category
         repo.setSuggestedCategory(txns[1].id, catId)                // a pending suggestion for it
 
-        repo.disableCategory(catId, "cat-other")
+        repo.disableCategory(catId, "cat-other", "cat-income")
 
         assertEquals("cat-other", repo.transactions(account).first { it.id == txns[0].id }.categoryId, "committed entry moves to Sonstiges")
         assertNull(repo.transactions(account).first { it.id == txns[1].id }.suggestedCategoryId, "its suggestion is cleared")
@@ -292,6 +292,51 @@ class VaultRepositoryTest {
 
         repo.enableCategory(catId)
         assertEquals(1L, repo.categories().first { it.id == catId }.enabled, "re-enabling restores the flag")
+    }
+
+    @Test
+    fun `disabling a category moves credits to the income fallback and leaves zero-amount rows on the neutral side`() {
+        val repo = repo()
+        val account = repo.addAccount("Giro", AccountType.GIRO)
+        repo.insertCategory("cat-other", "Sonstiges", CategoryKind.EXPENSE, "#9AA6AD", isSystem = true)
+        repo.insertCategory("cat-income", "Weitere Einkünfte", CategoryKind.INCOME, "#79B473", isSystem = true)
+        val catId = repo.addCategory("Events", CategoryKind.EXPENSE, "#C2185B")
+        repo.insertTransactions(account, null, listOf(tx(2, -1160, "debit"), tx(3, 2400, "credit"), tx(4, 0, "zero")))
+        repo.transactions(account).forEach { repo.setTransactionCategory(it.id, catId, "SEED_RULE") }
+
+        repo.disableCategory(catId, "cat-other", "cat-income")
+
+        val byHash = repo.transactions(account).associateBy { it.dedupHash }
+        assertEquals("cat-other", byHash.getValue("debit").categoryId, "a debit goes to the expense fallback")
+        assertEquals("cat-income", byHash.getValue("credit").categoryId, "a credit goes to the income fallback")
+        // A zero amount carries no direction (see allowedKindsForAmount), so calling it income would
+        // be inventing an incoming payment. It stays on the neutral side — and is not left behind.
+        assertEquals("cat-other", byHash.getValue("zero").categoryId, "a zero-amount row is not filed as income")
+        assertEquals(0L, repo.categoryTxnCount(catId), "no row is stranded in the disabled category")
+    }
+
+    @Test
+    fun `inTransaction rolls every write back when the body throws`() {
+        val repo = repo()
+        val account = repo.addAccount("Giro", AccountType.GIRO)
+        repo.insertCategory("cat-other", "Sonstiges", CategoryKind.EXPENSE, "#9AA6AD", isSystem = true)
+        repo.insertTransactions(account, null, listOf(tx(2, -1160, "a"), tx(3, -800, "b")))
+        repo.transactions(account).forEach { repo.setTransactionCategory(it.id, "cat-other", "SEED_RULE") }
+
+        // This is the shape of a re-classification: drop the automatic categories, then re-commit.
+        // If the second half throws, the first half must not survive it.
+        val boom = runCatching {
+            repo.inTransaction {
+                repo.transactions(account).forEach { repo.setTransactionCategory(it.id, null, null) }
+                error("classifier blew up")
+            }
+        }
+
+        assertTrue(boom.isFailure, "the failure is propagated to the caller")
+        assertTrue(
+            repo.transactions(account).all { it.categoryId == "cat-other" },
+            "the dropped categories are restored by the rollback, not left cleared",
+        )
     }
 
     @Test
@@ -346,6 +391,64 @@ class VaultRepositoryTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `vault settings and rule suppressions survive closing and reopening the vault`() {
+        val file = File(Files.createTempDirectory("pvault-reopen-settings").toFile(), "v.pvault")
+        VaultManager.create(file).let { vault ->
+            val repo = VaultRepository(vault)
+            repo.setSetting("classification.embedding.threshold", "0.42")
+            repo.setSetting("classification.embedding.threshold", "0.51") // upsert: last write wins
+            repo.suppressRule("rewe", "cat-groceries")                    // stored upper-cased
+            vault.close()
+        }
+        VaultManager.open(file).let { vault ->
+            val repo = VaultRepository(vault)
+            assertEquals("0.51", repo.settings()["classification.embedding.threshold"])
+            assertEquals(setOf("REWE" to "cat-groceries"), repo.suppressedRules())
+            repo.unsuppressRule("REWE", "cat-groceries")
+            assertTrue(repo.suppressedRules().isEmpty())
+            vault.close()
+        }
+    }
+
+    @Test
+    fun `opening a vault created before the classification tables existed adds them`() {
+        val file = File(Files.createTempDirectory("pvault-legacy-class").toFile(), "v.pvault")
+        VaultManager.create(file).close()
+        // Simulate a vault from before these tables shipped: drop them behind the schema's back.
+        DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}").use { c ->
+            c.createStatement().use { s ->
+                s.execute("DROP TABLE vaultSetting")
+                s.execute("DROP TABLE ruleSuppression")
+            }
+        }
+        // The additive open() shim must recreate them, so the vault keeps working.
+        VaultManager.open(file).let { vault ->
+            val repo = VaultRepository(vault)
+            repo.setSetting("k", "v")
+            repo.suppressRule("LIDL", "cat-groceries")
+            assertEquals("v", repo.settings()["k"])
+            assertEquals(setOf("LIDL" to "cat-groceries"), repo.suppressedRules())
+            vault.close()
+        }
+    }
+
+    @Test
+    fun `updating a rule rewrites its keyword, category, priority and source`() {
+        val repo = repo()
+        repo.insertCategory("cat-a", "A", CategoryKind.EXPENSE, "#111111", isSystem = true)
+        repo.insertCategory("cat-b", "B", CategoryKind.EXPENSE, "#222222", isSystem = true)
+        val id = repo.addRule("PENNY", "cat-a", priority = 0, source = "SEED")
+
+        repo.updateRule(id, "PENNYMARKT", "cat-b", priority = 100, source = "USER")
+
+        val rule = repo.categoryRules().single()
+        assertEquals("PENNYMARKT", rule.keyword)
+        assertEquals("cat-b", rule.categoryId)
+        assertEquals(100L, rule.priority)
+        assertEquals("USER", rule.source)
     }
 
     @Test

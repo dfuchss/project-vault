@@ -99,6 +99,30 @@ object VaultManager {
             """.trimIndent(),
             0,
         )
+        // Classification control: vault-scoped settings (classifier tuning) and the record of which
+        // built-in keyword rules the user removed, so the seed reconciler doesn't bring them back.
+        driver.execute(
+            null,
+            """
+            CREATE TABLE IF NOT EXISTS vaultSetting (
+                key   TEXT NOT NULL PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """.trimIndent(),
+            0,
+        )
+        driver.execute(
+            null,
+            """
+            CREATE TABLE IF NOT EXISTS ruleSuppression (
+                keyword    TEXT NOT NULL,
+                categoryId TEXT NOT NULL,
+                createdAt  INTEGER NOT NULL,
+                PRIMARY KEY (keyword, categoryId)
+            )
+            """.trimIndent(),
+            0,
+        )
         addColumnIfMissing(driver, table = "category", column = "enabled", ddl = "INTEGER NOT NULL DEFAULT 1")
         // Live securities prices: the per-account opt-in, and the quote time behind a repriced holding.
         addColumnIfMissing(driver, table = "account", column = "liveQuotes", ddl = "INTEGER NOT NULL DEFAULT 0")

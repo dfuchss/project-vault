@@ -138,6 +138,22 @@ class VaultRepository(private val db: VaultDatabase) {
     fun updateCategoryMeta(id: String, name: String, color: String?) =
         db.categoryQueries.updateCategoryMeta(name, color, id)
 
+    /**
+     * Runs [body] inside one database transaction, so a multi-step rewrite of the user's data is
+     * all-or-nothing. Exposed because some of those steps live above this class: re-classification
+     * *drops* every automatic category before it re-commits them, and a failure between the two
+     * halves would leave the vault stripped of categories it can no longer restore.
+     *
+     * Only put work here that must be atomic — anything slow or throw-prone that commits nothing
+     * (loading an embedding model, computing Tier-2 suggestions) belongs outside.
+     */
+    fun <T> inTransaction(body: () -> T): T {
+        var result: T? = null
+        db.transaction { result = body() }
+        @Suppress("UNCHECKED_CAST")
+        return result as T
+    }
+
     /** How many transactions are currently committed to this category (drives the disable warning). */
     fun categoryTxnCount(id: String): Long = db.txnQueries.countTxnsByCategory(id).executeAsOne()
 
@@ -145,14 +161,22 @@ class VaultRepository(private val db: VaultDatabase) {
     fun enableCategory(id: String) = db.categoryQueries.setCategoryEnabled(1L, id)
 
     /**
-     * Disables a category the user doesn't want: its committed entries are reassigned to [fallbackId]
-     * (Sonstiges), any pending suggestions pointing at it are cleared, and it's flagged disabled — all
-     * in one transaction. Learned rules are left intact but ignored while disabled (see the classifier),
-     * so re-enabling restores auto-classification. Reassignment is one-way.
+     * Disables a category the user doesn't want: its committed entries are reassigned, any pending
+     * suggestions pointing at it are cleared, and it's flagged disabled — all in one transaction.
+     * Learned rules are left intact but ignored while disabled (see the classifier), so re-enabling
+     * restores auto-classification. Reassignment is one-way.
+     *
+     * Entries move by **sign**: debits to [fallbackId] (Sonstiges) and credits to [incomeFallbackId]
+     * (Weitere Einkünfte). Only expense categories can be disabled, but one can still hold incoming
+     * rows — older vaults classified before the amount sign constrained the classifier are full of
+     * them — and sweeping those into Sonstiges is how an income ends up labelled as an expense.
+     * "Credit" means strictly `> 0`, the same boundary `allowedKindsForAmount` uses: a zero-amount
+     * row carries no direction and so is not moved to the income side.
      */
-    fun disableCategory(id: String, fallbackId: String) {
+    fun disableCategory(id: String, fallbackId: String, incomeFallbackId: String) {
         db.transaction {
-            db.txnQueries.reassignCategoryReferences(fallbackId, id)
+            db.txnQueries.reassignDebitCategoryReferences(fallbackId, id)
+            db.txnQueries.reassignCreditCategoryReferences(incomeFallbackId, id)
             db.txnQueries.clearSuggestionReferences(id)
             db.categoryQueries.setCategoryEnabled(0L, id)
         }
@@ -176,9 +200,13 @@ class VaultRepository(private val db: VaultDatabase) {
 
     fun categoryRules(): List<CategoryRule> = db.categoryRuleQueries.selectAllRules().executeAsList()
 
-    fun addRule(keyword: String, categoryId: String, priority: Int, source: String) {
-        db.categoryRuleQueries.insertRule(newId(), keyword, categoryId, priority.toLong(), source, now())
-    }
+    /** Adds a keyword rule and returns its id. */
+    fun addRule(keyword: String, categoryId: String, priority: Int, source: String): String =
+        newId().also { db.categoryRuleQueries.insertRule(it, keyword, categoryId, priority.toLong(), source, now()) }
+
+    /** Rewrites one rule wholesale (rule editor). [source] moves with it — see the query's comment. */
+    fun updateRule(id: String, keyword: String, categoryId: String, priority: Int, source: String) =
+        db.categoryRuleQueries.updateRule(keyword, categoryId, priority.toLong(), source, id)
 
     fun deleteUserRuleByKeyword(keyword: String) = db.categoryRuleQueries.deleteUserRuleByKeyword(keyword)
 
@@ -186,6 +214,28 @@ class VaultRepository(private val db: VaultDatabase) {
 
     /** Removes every rule pointing at a category (used when replacing a user category's keywords). */
     fun deleteRulesByCategory(categoryId: String) = db.categoryRuleQueries.deleteRulesByCategory(categoryId)
+
+    // --- Suppressed built-in rules (a removed SEED keyword must not come back on the next open) ---
+
+    /** The catalog (keyword, categoryId) pairs the user removed; keywords are upper-cased. */
+    fun suppressedRules(): Set<Pair<String, String>> =
+        db.ruleSuppressionQueries.selectAllSuppressions().executeAsList()
+            .mapTo(HashSet()) { it.keyword to it.categoryId }
+
+    fun suppressRule(keyword: String, categoryId: String) =
+        db.ruleSuppressionQueries.insertSuppression(keyword.uppercase(), categoryId, now())
+
+    fun unsuppressRule(keyword: String, categoryId: String) =
+        db.ruleSuppressionQueries.deleteSuppression(keyword.uppercase(), categoryId)
+
+    // --- Vault-scoped settings (travel with the vault file; see VaultSetting.sq) ---
+
+    fun settings(): Map<String, String> =
+        db.vaultSettingQueries.selectAllSettings().executeAsList().associate { it.key to it.value_ }
+
+    fun setSetting(key: String, value: String) = db.vaultSettingQueries.upsertSetting(key, value)
+
+    fun clearSetting(key: String) = db.vaultSettingQueries.deleteSetting(key)
 
     fun setTransactionCategory(txnId: String, categoryId: String?, source: String?) =
         db.txnQueries.updateTxnCategory(categoryId, source, txnId)
@@ -228,6 +278,10 @@ class VaultRepository(private val db: VaultDatabase) {
 
     fun transactionCount(accountId: String): Long =
         db.txnQueries.countTxnsForAccount(accountId).executeAsOne()
+
+    /** How many of an account's transactions still have no category — the review inbox's badge. */
+    fun uncategorizedCount(accountId: String): Long =
+        db.txnQueries.countUncategorizedForAccount(accountId).executeAsOne()
 
     /** Inserts transactions idempotently (dedup index); returns how many were newly inserted. */
     fun insertTransactions(accountId: String, batchId: String?, transactions: List<NewTransaction>): Int {

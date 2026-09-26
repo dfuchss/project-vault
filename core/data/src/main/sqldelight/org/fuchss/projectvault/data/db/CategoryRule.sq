@@ -23,3 +23,9 @@ DELETE FROM categoryRule WHERE id = ?;
 
 deleteRulesByCategory:
 DELETE FROM categoryRule WHERE categoryId = ?;
+
+-- Full edit of one rule from the rule editor. `source` is part of the update because editing a
+-- built-in rule takes it over: it becomes a USER rule, which is what keeps the seed reconciler from
+-- pruning it as "a SEED rule no longer in the catalog".
+updateRule:
+UPDATE categoryRule SET keyword = ?, categoryId = ?, priority = ?, source = ? WHERE id = ?;

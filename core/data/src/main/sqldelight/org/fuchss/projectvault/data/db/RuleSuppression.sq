@@ -1,0 +1,23 @@
+-- Built-in (SEED) keyword rules the user removed or took over in the rule editor.
+--
+-- Seeding is reconciling: `Categorizer.ensureSeeded` re-inserts every SeedCatalog (keyword, category)
+-- pair that is missing, so simply DELETEing a built-in rule would bring it back on the next open.
+-- A suppression records "the user does not want this catalog pair", which the reconciler honours —
+-- and which deleting the row could not express, because the record has to outlive the rule.
+--
+-- `keyword` is stored upper-cased, matching the case-insensitive comparison the reconciler uses.
+CREATE TABLE ruleSuppression (
+    keyword    TEXT NOT NULL,
+    categoryId TEXT NOT NULL,
+    createdAt  INTEGER NOT NULL,
+    PRIMARY KEY (keyword, categoryId)
+);
+
+selectAllSuppressions:
+SELECT * FROM ruleSuppression;
+
+insertSuppression:
+INSERT OR REPLACE INTO ruleSuppression(keyword, categoryId, createdAt) VALUES (?, ?, ?);
+
+deleteSuppression:
+DELETE FROM ruleSuppression WHERE keyword = ? AND categoryId = ?;
