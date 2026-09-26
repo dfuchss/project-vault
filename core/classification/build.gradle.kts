@@ -46,3 +46,12 @@ val fetchEmbeddingModel by tasks.registering {
 }
 
 tasks.named("processResources") { dependsOn(fetchEmbeddingModel) }
+
+// The evaluation harness (ClassifierComparisonTest) reports precision/coverage curves on stdout —
+// the thresholds are re-tuned by reading them, so they must reach the console (as in :core:import).
+tasks.test {
+    testLogging {
+        showStandardStreams = true
+        events("passed", "skipped", "failed")
+    }
+}
