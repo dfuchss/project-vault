@@ -25,6 +25,13 @@ fun main() {
     // before AWT initializes, so do it first thing in main(). The bold app-menu label itself is driven
     // by `-Xdock:name` (dev run, see build.gradle) or the bundle's CFBundleName (packaged app).
     System.setProperty("apple.awt.application.name", "Project Vault")
+    val prefs = AppPrefs.default()
+    val savedThemeMode = runCatching { ThemeMode.valueOf(prefs.getString(AppPrefs.THEME_MODE) ?: "SYSTEM") }.getOrDefault(ThemeMode.SYSTEM)
+    // The native window chrome (macOS title bar, file dialogs) follows the OS appearance unless told
+    // otherwise, so a forced Light mode on a dark-mode Mac got a black title bar over a light app.
+    // AWT reads this once when it initializes — before the Desktop call below — so a theme change
+    // made in the running app reaches the chrome on the next launch.
+    System.setProperty("apple.awt.application.appearance", macAppearance(savedThemeMode))
     // Replace the default macOS "About java" item with our own, so About identifies as Project Vault.
     runCatching {
         val desktop = java.awt.Desktop.getDesktop()
@@ -40,12 +47,10 @@ fun main() {
         }
     }
 
-    val prefs = AppPrefs.default()
-
     application {
         val state = rememberWindowState(size = DpSize(1280.dp, 860.dp))
         var themeMode by remember {
-            mutableStateOf(runCatching { ThemeMode.valueOf(prefs.getString(AppPrefs.THEME_MODE) ?: "SYSTEM") }.getOrDefault(ThemeMode.SYSTEM))
+            mutableStateOf(savedThemeMode)
         }
         var language by remember { mutableStateOf(AppLanguage.fromCode(prefs.getString(AppPrefs.LANGUAGE))) }
         // Mirror the chosen language to the global holder so non-composable code (import summaries,
@@ -86,6 +91,13 @@ fun main() {
             }
         }
     }
+}
+
+/** The `apple.awt.application.appearance` value for [mode]: an NSAppearance name, or follow the OS. */
+internal fun macAppearance(mode: ThemeMode): String = when (mode) {
+    ThemeMode.SYSTEM -> "system"
+    ThemeMode.LIGHT -> "NSAppearanceNameAqua"
+    ThemeMode.DARK -> "NSAppearanceNameDarkAqua"
 }
 
 // ---------------------------------------------------------------- AWT file dialogs

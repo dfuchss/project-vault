@@ -65,6 +65,25 @@ private val Light = lightColorScheme(
     outline = Color(0xFFBCC8CF),
     outlineVariant = Color(0xFFDEE5EA),
     error = Color(0xFFB3261E),
+    // Every remaining role is set explicitly: whatever is left out falls back to Material's baseline
+    // *purple* scheme, which then leaks into stock components (e.g. a Slider's inactive track is
+    // secondaryContainer — it rendered lavender on the Models tab).
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFD5E3E8),
+    onSecondaryContainer = Color(0xFF0E3A44),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFFFDBCF),
+    onTertiaryContainer = Color(0xFF3A0B00),
+    onError = Color.White,
+    errorContainer = Color(0xFFF9DEDC),
+    onErrorContainer = Color(0xFF410E0B),
+    inversePrimary = Color(0xFF7FD4E0),
+    inverseSurface = Color(0xFF2B3236),
+    inverseOnSurface = Color(0xFFEDF2F4),
+    surfaceTint = Color(0xFF116A78),
+    surfaceBright = Color(0xFFFFFFFF),
+    surfaceDim = Color(0xFFD9E1E5),
+    scrim = Color.Black,
 )
 
 private val Dark = darkColorScheme(
@@ -88,6 +107,23 @@ private val Dark = darkColorScheme(
     outline = Color(0xFF7C8B92),
     outlineVariant = Color(0xFF323E43),
     error = Color(0xFFFFB4AB),
+    // See Light: no role may fall back to the baseline purple scheme.
+    onSecondary = Color(0xFF1C333C),
+    secondaryContainer = Color(0xFF2B3B41),
+    onSecondaryContainer = Color(0xFFCDE3EA),
+    onTertiary = Color(0xFF4A1300),
+    tertiaryContainer = Color(0xFF7A2A12),
+    onTertiaryContainer = Color(0xFFFFDBCF),
+    onError = Color(0xFF601410),
+    errorContainer = Color(0xFF8C1D18),
+    onErrorContainer = Color(0xFFF9DEDC),
+    inversePrimary = Color(0xFF116A78),
+    inverseSurface = Color(0xFFE4E8EA),
+    inverseOnSurface = Color(0xFF1A2225),
+    surfaceTint = Color(0xFF7FD4E0),
+    surfaceBright = Color(0xFF2E393E),
+    surfaceDim = Color(0xFF0E1315),
+    scrim = Color.Black,
 )
 
 /**
