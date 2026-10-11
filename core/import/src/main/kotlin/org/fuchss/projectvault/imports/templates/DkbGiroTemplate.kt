@@ -23,13 +23,19 @@ import kotlin.math.abs
  * `15.07.2026Echtzeitüberweisung / Wert: 14.07.2026`, so we split the date off the front and read the
  * "Wert:" value date. Occasionally an amount renders on its own line just above its date line; that
  * orphan amount is carried to the next transaction.
+ *
+ * PDFBox sometimes reads a kerning gap inside a word as a space, so the date can come out as
+ * `0 2.10.2026Kartenzahlung` (or even split into two tokens), and the account line as
+ * `G  irokonto …`. The date column and the account keyword are therefore matched whitespace-tolerantly;
+ * a strict match used to drop such a booking entirely (its amount was taken for an orphan and lost).
  */
 class DkbGiroTemplate : StatementTemplate {
     override val id = "dkb-giro"
     override val bank = Bank.DKB
     override val kind = StatementKind.GIRO
 
-    private val datePrefix = Regex("""^(\d{2}\.\d{2}\.\d{4})(.*)$""")
+    // dd.mm.yyyy at the start of the date column, tolerating stray spaces between its characters.
+    private val datePrefix = Regex("""^(\d\s*\d\s*\.\s*\d\s*\d\s*\.\s*\d\s*\d\s*\d\s*\d)(.*)$""")
     private val wert = Regex("""Wert:\s*(\d{2}\.\d{2}\.\d{4})""")
     private val wertClause = Regex("""/?\s*Wert:\s*\d{2}\.\d{2}\.\d{4}""")
     private val datum = Regex("""DATUM\s*(\d{2}\.\d{2}\.\d{4})""")
@@ -55,7 +61,9 @@ class DkbGiroTemplate : StatementTemplate {
 
         val fullText = doc.text.replace("\n", " ")
         val statementNumber = Regex("""Kontoauszug\s+(\d+/\d{4})""").find(fullText)?.groupValues?.get(1)
-        val accountMatch = Regex("""(?:Girokonto|Tagesgeld|Festgeld|Geldmarktkonto)\s+(\S+),\s*(DE[0-9 ]{6,})""").find(fullText)
+        val accountKinds = listOf("Girokonto", "Tagesgeld", "Festgeld", "Geldmarktkonto")
+            .joinToString("|") { word -> word.toList().joinToString("""\s*""") { Regex.escape(it.toString()) } }
+        val accountMatch = Regex("""(?:$accountKinds)\s+(\S+),\s*(DE[0-9 ]{6,})""").find(fullText)
         val accountRef = accountMatch?.groupValues?.get(1)
         val iban = accountMatch?.groupValues?.get(2)?.replace(" ", "")?.take(22)
 
@@ -94,12 +102,13 @@ class DkbGiroTemplate : StatementTemplate {
             }
 
             val amount = amountToken(line)
-            val dateColTok = line.tokens.firstOrNull { it.x < descX - 10f && datePrefix.matches(it.text) }
+            // The date column may hold the date as one token or, after a kerning split, several.
+            val dateColText = line.tokens.filter { it.x < descX - 10f }.joinToString(" ") { it.text }
+            val match = datePrefix.find(dateColText)
 
             when {
-                dateColTok != null -> {
-                    val match = datePrefix.find(dateColTok.text)!!
-                    val bookingDate = GermanFormats.findDate(match.groupValues[1])!!
+                match != null -> {
+                    val bookingDate = GermanFormats.findDate(match.groupValues[1].filterNot(Char::isWhitespace))!!
                     // Combine the text after the date with any other description-column tokens on the
                     // line, since "/ Wert: <date>" is sometimes merged into the date token and
                     // sometimes a separate token.

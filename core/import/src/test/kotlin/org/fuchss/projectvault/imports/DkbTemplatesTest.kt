@@ -110,4 +110,54 @@ class DkbTemplatesTest {
         assertEquals("Max Mustermann", t.counterparty)
         assertTrue(s.balance.ok, "expected balance to reconcile: ${s.balance}")
     }
+    /**
+     * PDFBox can read a kerning gap inside a word as a space: the date column comes out as
+     * `0 2.10.2026Kartenzahlung` (or split into two tokens) and the account line as `G  irokonto`.
+     * A strict date match used to take such a row's amount for an orphan and silently drop the
+     * booking, gluing its detail lines onto the previous one — the balance then failed to reconcile.
+     */
+    @Test
+    fun `dkb giro tolerates stray spaces in the date column and account line`() {
+        val document = doc(
+            line(tok(43f, "Deutsche Kreditbank AG")),
+            line(tok(68f, "Kontoauszug 10/2026"), tok(512f, "Seite 1 von 1")),
+            line(tok(68f, "G  irokonto 12345678, DE02 1203 0000 0000 0000 00")),
+            line(tok(71f, "Datum"), tok(123f, "Erläuterung"), tok(394f, "Betrag Soll EUR"), tok(486f, "Betrag Haben EUR")),
+            line(tok(123f, "Kontostand am 04.09.2026, Auszug Nr.    9"), tok(498f, "500,00")),
+            line(tok(70f, "01.10.2026Basislastschrift"), tok(403f, "-40,00")),
+            line(tok(123f, "STROMVERSORGER GMBH Abschlag")),
+            // kerning space inside a single date token
+            line(tok(69f, "0 2.10.2026Kartenzahlung"), tok(403f, "-12,00")),
+            line(tok(123f, "BAECKEREI.MUSTER/Musterstadt/../DE")),
+            line(tok(123f, "2026-10-01T08:15 Debitk.00 2099-12 Zahl.System VISA")),
+            // kerning gap wide enough to split the date into two tokens
+            line(tok(69f, "0", width = 5f), tok(76f, "3.10.2026Zahlungseingang"), tok(505f, "30,00")),
+            line(tok(123f, "Erika Musterfrau Rueckzahlung")),
+            line(tok(123f, "Kontostand am 03.10.2026 um 18:05 Uhr"), tok(498f, "478,00")),
+        )
+
+        val result = StatementImporter().importDocument(document, "giro.pdf")
+        val s = result.statement
+
+        assertEquals("12345678", s.accountRef)
+        assertEquals("DE02120300000000000000", s.iban)
+        assertEquals(3, s.transactions.size)
+
+        val card = s.transactions[1]
+        assertEquals(LocalDate.of(2026, 10, 2), card.bookingDate)
+        assertEquals(-1200, card.amountCents)
+        assertEquals("Kartenzahlung", card.bookingType)
+        assertEquals(LocalDate.of(2026, 10, 1), card.valueDate)
+        assertEquals("BAECKEREI.MUSTER/Musterstadt/../DE", card.counterparty)
+        // the previous booking must not have swallowed the card row's detail lines
+        assertEquals("Basislastschrift | STROMVERSORGER GMBH Abschlag", s.transactions[0].purpose)
+
+        val credit = s.transactions[2]
+        assertEquals(LocalDate.of(2026, 10, 3), credit.bookingDate)
+        assertEquals(3000, credit.amountCents)
+        assertEquals("Zahlungseingang", credit.bookingType)
+        assertEquals("Erika Musterfrau Rueckzahlung", credit.counterparty)
+
+        assertTrue(result.balance.ok, "expected balance-integrity to hold: ${result.balance}")
+    }
 }
